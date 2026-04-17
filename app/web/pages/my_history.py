@@ -1,12 +1,14 @@
+import pandas as pd
 import streamlit as st
-import urllib.parse
 
 from app.config import get_settings
 from app.ingest.sync_service import ChessComSyncService
 from app.services.history_service import HistoryFilters, HistoryService
 from app.services.time_control import format_time_control
+from app.web.components.auth import require_auth
 from app.web.components.charts import elo_trend_chart, opening_pie_chart
 
+require_auth()
 
 settings = get_settings()
 service = HistoryService()
@@ -100,19 +102,34 @@ with left:
         display_df = recent_df.copy()
         if "time_control" in display_df.columns:
             display_df["time_control"] = display_df["time_control"].apply(format_time_control)
-        display_df["load_game"] = display_df["game_id"].apply(
-            lambda g: "/game-analysis?" + urllib.parse.urlencode({"game_id": g})
-        )
-        st.dataframe(
-            display_df[["played_at", "opponent", "color", "result", "time_control", "stockfish_cp", "load_game"]],
+        if "game_id" in display_df.columns:
+            display_df["view"] = display_df["game_id"].apply(
+                lambda gid: f"/game-analysis?game_id={gid}" if pd.notna(gid) and str(gid).strip() else None
+            )
+        cols = ["played_at", "opponent", "color", "result", "time_control", "stockfish_cp", "game_id", "view"]
+        display_cols = [c for c in cols if c in display_df.columns]
+        table_event = st.dataframe(
+            display_df[display_cols],
             use_container_width=True,
             hide_index=True,
             column_config={
-                "load_game": st.column_config.LinkColumn("Game", display_text="Load Game"),
+                "game_id": None,
+                "view": st.column_config.LinkColumn(
+                    "View", display_text="View", help="Open game analysis", width="small"
+                ),
             },
+            on_select="rerun",
+            selection_mode="single-row",
+            key="history_table",
         )
+        if table_event and table_event.selection and table_event.selection.rows:
+            sel_idx = table_event.selection.rows[0]
+            sel_game_id = str(display_df.iloc[sel_idx]["game_id"])
+            if st.button("Open in Analysis", key="history_load_game", use_container_width=True):
+                st.session_state["pending_game_id"] = sel_game_id
+                st.switch_page("app/web/pages/game_analysis.py")
 
 with right:
     st.plotly_chart(opening_pie_chart(opening_df), use_container_width=True, config={"displaylogo": False, "plotlyServerURL": ""})
 
-st.caption("Use the link in each row to open a game in Game Analysis.")
+st.caption("Select a row and click Load Game to open it in Game Analysis.")

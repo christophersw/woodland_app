@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import urllib.parse
 
 import chess.pgn
 import chess.svg
@@ -12,6 +11,7 @@ import pandas as pd
 from sqlalchemy import select
 import streamlit as st
 
+from app.web.components.auth import require_auth
 from app.services.game_search_service import (
     SearchPlanError,
     execute_sql_search,
@@ -31,15 +31,13 @@ from app.web.components.charts import opening_starburst_chart
 # ---------------------------------------------------------------------------
 
 VISIBLE_COLUMNS = {
-    "white_username", "black_username", "lichess_opening", "result_pgn", "load_game",
+    "white_username", "black_username", "lichess_opening", "result_pgn",
     "player", "opponent", "result", "opening",
 }
 
 
 def _column_config(df: pd.DataFrame) -> dict:
-    cfg: dict = {
-        "load_game": st.column_config.LinkColumn("Game", display_text="Load Game"),
-    }
+    cfg: dict = {}
     for col in df.columns:
         if col not in VISIBLE_COLUMNS:
             cfg[col] = None
@@ -232,13 +230,13 @@ def _render_results(results_df: pd.DataFrame) -> None:
     enriched = _ensure_pgn(results_df)
     enriched = _ensure_opening_plies(enriched)
 
-    # Prepare display table
+    # Add a per-row View link column
     table_df = enriched.copy()
     if "time_control" in table_df.columns:
         table_df["time_control"] = table_df["time_control"].apply(format_time_control)
     if "game_id" in table_df.columns:
-        table_df["load_game"] = table_df["game_id"].apply(
-            lambda g: "/game-analysis?" + urllib.parse.urlencode({"game_id": g})
+        table_df["view"] = table_df["game_id"].apply(
+            lambda gid: f"/game-analysis?game_id={gid}" if pd.notna(gid) and str(gid).strip() else None
         )
 
     st.markdown("---")
@@ -248,12 +246,17 @@ def _render_results(results_df: pd.DataFrame) -> None:
 
     with table_col:
         st.markdown("### Results")
-        st.caption(f"Showing {len(enriched)} games. Click a row to preview.")
+        st.caption(f"Showing {len(enriched)} games. Click a row to preview, or View to open analysis.")
+        col_cfg = _column_config(table_df)
+        if "view" in table_df.columns:
+            col_cfg["view"] = st.column_config.LinkColumn(
+                "View", display_text="View", help="Open game analysis", width="small"
+            )
         table_event = st.dataframe(
             table_df,
             use_container_width=True,
             hide_index=True,
-            column_config=_column_config(table_df),
+            column_config=col_cfg,
             on_select="rerun",
             selection_mode="single-row",
             key="results_table",
@@ -263,6 +266,15 @@ def _render_results(results_df: pd.DataFrame) -> None:
     selected_row_idx = None
     if table_event and table_event.selection and table_event.selection.rows:
         selected_row_idx = table_event.selection.rows[0]
+
+    # Button for in-app navigation of the selected game
+    if selected_row_idx is not None and selected_row_idx < len(enriched):
+        sel_row = enriched.iloc[selected_row_idx]
+        sel_game_id = sel_row.get("game_id", "")
+        if sel_game_id:
+            if st.button("Open in Analysis", key="search_load_game", use_container_width=False):
+                st.session_state["pending_game_id"] = str(sel_game_id)
+                st.switch_page("app/web/pages/game_analysis.py")
 
     with board_col:
         st.markdown("### Board Preview")
@@ -302,6 +314,8 @@ def _render_results(results_df: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 # Page layout
 # ---------------------------------------------------------------------------
+
+require_auth()
 
 st.title("Game Search")
 st.caption("Search your games and preview openings.")

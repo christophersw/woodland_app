@@ -1,23 +1,21 @@
 import streamlit as st
 
 from app.services.analysis_service import AnalysisService
-from app.services.time_control import format_time_control
+from app.web.components.auth import require_auth
 from app.web.components.game_board import render_svg_game_viewer
 
+require_auth()
 
 service = AnalysisService()
 
 st.title("Game Analysis")
 st.caption("Full-game SVG board with best-move arrows and eval chart.")
 
-query_params = st.query_params
-game_id = query_params.get("game_id", "")
-
-if isinstance(game_id, list):
-    game_id = game_id[0] if game_id else ""
+# session_state is preferred (set by the in-app button); query_params support direct URL navigation.
+game_id = st.session_state.pop("pending_game_id", None) or st.query_params.get("game_id", "")
 
 if not game_id:
-    st.warning("Missing game_id. Open this page with /game-analysis?game_id=<id>.")
+    st.warning("No game selected. Choose a game from My History or Game Search.")
     st.stop()
 
 analysis = service.get_game_analysis(game_id)
@@ -30,7 +28,7 @@ details_parts = []
 if analysis.date:
     details_parts.append(analysis.date)
 if analysis.time_control:
-    details_parts.append(format_time_control(analysis.time_control))
+    details_parts.append(analysis.time_control)
 details_line = " · ".join(details_parts)
 if analysis.url:
     details_line += f"  [View on Chess.com]({analysis.url})"

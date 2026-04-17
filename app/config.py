@@ -1,4 +1,3 @@
-from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +25,5 @@ class Settings(BaseSettings):
         return [u.strip().lower() for u in self.chess_com_usernames.split(",") if u.strip()]
 
 
-@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()

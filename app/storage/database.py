@@ -1,3 +1,5 @@
+import threading
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -27,10 +29,20 @@ def _engine():
 ENGINE = _engine()
 SessionLocal = sessionmaker(bind=ENGINE, autoflush=False, autocommit=False)
 
+_db_initialized = False
+_db_lock = threading.Lock()
+
 
 def init_db() -> None:
-    Base.metadata.create_all(ENGINE)
-    _run_lightweight_migrations()
+    """Initialize DB schema and run migrations. Safe to call many times — only runs once per process."""
+    global _db_initialized
+    if _db_initialized:
+        return
+    with _db_lock:
+        if not _db_initialized:
+            Base.metadata.create_all(ENGINE)
+            _run_lightweight_migrations()
+            _db_initialized = True
 
 
 def _run_lightweight_migrations() -> None:
