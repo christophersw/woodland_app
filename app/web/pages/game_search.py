@@ -238,7 +238,7 @@ def _render_results(results_df: pd.DataFrame) -> None:
         table_df["time_control"] = table_df["time_control"].apply(format_time_control)
     if "game_id" in table_df.columns:
         table_df["load_game"] = table_df["game_id"].apply(
-            lambda g: f"/game-analysis?{urllib.parse.urlencode({'game_id': g})}"
+            lambda g: "/game-analysis?" + urllib.parse.urlencode({"game_id": g})
         )
 
     st.markdown("---")

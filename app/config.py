@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     ingest_month_limit: int = 24
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-3-haiku-20240307"
+    auth_enabled: bool = False
+    auth_bootstrap_admin_email: str = ""
+    auth_bootstrap_admin_password: str = ""
+    auth_signing_key: str = ""
+    auth_token_ttl_seconds: int = 604800
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -1,6 +1,5 @@
-import urllib.parse
-
 import streamlit as st
+import urllib.parse
 
 from app.config import get_settings
 from app.ingest.sync_service import ChessComSyncService
@@ -102,7 +101,7 @@ with left:
         if "time_control" in display_df.columns:
             display_df["time_control"] = display_df["time_control"].apply(format_time_control)
         display_df["load_game"] = display_df["game_id"].apply(
-            lambda g: f"/game-analysis?{urllib.parse.urlencode({'game_id': g})}"
+            lambda g: "/game-analysis?" + urllib.parse.urlencode({"game_id": g})
         )
         st.dataframe(
             display_df[["played_at", "opponent", "color", "result", "time_control", "stockfish_cp", "load_game"]],

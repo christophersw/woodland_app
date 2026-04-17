@@ -1,11 +1,13 @@
 import streamlit as st
 
 from app.storage.database import init_db
+from app.web.components.auth import require_auth
 
 
 def main() -> None:
     st.set_page_config(page_title="Woodland Chess", page_icon="♟", layout="wide")
     init_db()
+    require_auth()
 
     history_page = st.Page(
         "app/web/pages/my_history.py",
