@@ -5,7 +5,6 @@ import io
 
 import chess.pgn
 import pandas as pd
-from sqlalchemy import select
 
 from app.storage.database import get_session, init_db
 from app.storage.models import Game
@@ -32,6 +31,9 @@ class GameAnalysisData:
     result: str
     pgn: str
     moves: pd.DataFrame
+    date: str = ""
+    time_control: str = ""
+    url: str = ""
 
 
 class AnalysisService:
@@ -42,10 +44,24 @@ class AnalysisService:
         if not game_id:
             return None
 
-        pgn = self._pgn_for_game(game_id)
+        pgn, db_game = self._pgn_for_game(game_id)
         game = chess.pgn.read_game(io.StringIO(pgn))
         if game is None:
             return None
+
+        # Resolve metadata from DB row first, fall back to PGN headers
+        date = ""
+        time_control = ""
+        url = ""
+        if db_game is not None:
+            if db_game.played_at:
+                date = db_game.played_at.strftime("%Y-%m-%d %H:%M")
+            time_control = db_game.time_control or ""
+        if not date:
+            date = game.headers.get("Date", "")
+        if not time_control:
+            time_control = game.headers.get("TimeControl", "")
+        url = game.headers.get("Link", "")
 
         board = game.board()
         rows: list[dict] = []
@@ -73,12 +89,15 @@ class AnalysisService:
             result=game.headers.get("Result", "*"),
             pgn=pgn,
             moves=pd.DataFrame(rows),
+            date=date,
+            time_control=time_control,
+            url=url,
         )
 
     @staticmethod
-    def _pgn_for_game(game_id: str) -> str:
+    def _pgn_for_game(game_id: str) -> tuple[str, Game | None]:
         with get_session() as session:
-            row = session.scalar(select(Game.pgn).where(Game.id == game_id))
-            if row:
-                return row
-        return SAMPLE_PGN
+            db_game = session.get(Game, game_id)
+            if db_game and db_game.pgn:
+                return db_game.pgn, db_game
+        return SAMPLE_PGN, None

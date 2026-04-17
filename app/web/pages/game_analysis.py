@@ -1,7 +1,7 @@
 import streamlit as st
 
 from app.services.analysis_service import AnalysisService
-from app.web.components.charts import eval_timeline_chart
+from app.services.time_control import format_time_control
 from app.web.components.game_board import render_svg_game_viewer
 
 
@@ -25,27 +25,28 @@ if analysis is None or analysis.moves.empty:
     st.error("Game analysis not found for the requested game_id.")
     st.stop()
 
-meta_a, meta_b, meta_c = st.columns(3)
-meta_a.metric("Game ID", analysis.game_id)
-meta_b.metric("Players", f"{analysis.white} vs {analysis.black}")
-meta_c.metric("Result", analysis.result)
+st.subheader(f"{analysis.white} vs {analysis.black} — {analysis.result}")
+details_parts = []
+if analysis.date:
+    details_parts.append(analysis.date)
+if analysis.time_control:
+    details_parts.append(format_time_control(analysis.time_control))
+details_line = " · ".join(details_parts)
+if analysis.url:
+    details_line += f"  [View on Chess.com]({analysis.url})"
+if details_line:
+    st.caption(details_line)
 
-left, right = st.columns([1.1, 1])
-with left:
-    st.subheader("Board")
-    render_svg_game_viewer(
-        analysis.pgn,
-        moves_df=analysis.moves,
-        size=560,
-        orientation="white",
-        initial_ply="last",
-    )
+# Build eval data for the linked chart
+eval_data = None
+if "ply" in analysis.moves.columns and "cp_eval" in analysis.moves.columns:
+    eval_data = analysis.moves[["ply", "cp_eval"]].to_dict(orient="records")
 
-with right:
-    st.subheader("Evaluation")
-    st.plotly_chart(
-        eval_timeline_chart(analysis.moves),
-        use_container_width=True,
-        key=f"eval_chart_{analysis.game_id}",
-        config={"displaylogo": False, "plotlyServerURL": ""},
-    )
+render_svg_game_viewer(
+    analysis.pgn,
+    moves_df=analysis.moves,
+    size=560,
+    orientation="white",
+    initial_ply="last",
+    eval_data=eval_data,
+)

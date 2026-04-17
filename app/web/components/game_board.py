@@ -17,10 +17,15 @@ def render_svg_game_viewer(
     size: int = 560,
     orientation: str = "white",
     initial_ply: int | str = "last",
+    eval_data: list[dict] | None = None,
 ) -> None:
     """Full-game SVG viewer with play/pause, scrubber, move list, and best-move arrows.
 
     ``moves_df`` must have columns: ply, san, fen, arrow_uci (UCI of best move).
+    ``eval_data`` — optional list of {"ply": int, "cp_eval": float} dicts.
+    When provided, an interactive Plotly.js eval chart is embedded below the
+    board and kept in sync: navigating the board highlights the current bar,
+    and clicking a bar jumps the board to that ply.
     """
     viewer_id = f"svg-{uuid4().hex}"
     game = chess.pgn.read_game(io.StringIO(pgn))
@@ -150,6 +155,7 @@ def render_svg_game_viewer(
                value="{start_ply}" oninput="goTo(parseInt(this.value))">
         <span class="ply-label" id="{viewer_id}-label"></span>
       </div>
+      <div id="{viewer_id}-eval"></div>
       <div class="move-list" id="{viewer_id}-moves">{moves_html}</div>
     </div>
 
@@ -189,6 +195,10 @@ def render_svg_game_viewer(
             active.scrollIntoView({{ block: 'nearest' }});
           }}
         }}
+        // highlight current ply on eval chart
+        if (window._evalChart) {{
+          updateEvalHighlight(currentPly);
+        }}
       }}
 
       window.goTo = function(ply) {{
@@ -225,8 +235,66 @@ def render_svg_game_viewer(
     </script>
     """
 
-    # Height: board + controls + move list
-    st.components.v1.html(html, height=size + 280)
+    # -- Optionally embed a linked Plotly.js eval chart -----------------------
+    eval_chart_html = ""
+    eval_extra_height = 0
+    if eval_data:
+        eval_json = json.dumps(eval_data)
+        eval_extra_height = 270
+        eval_chart_html = f"""
+    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+    <script>
+    (function() {{
+      const evalData = {eval_json};
+      const plies = evalData.map(d => d.ply);
+      const evals = evalData.map(d => d.cp_eval);
+      const defaultColor = '#4c78a8';
+      const highlightColor = '#e45756';
+      const colors = evals.map(() => defaultColor);
+
+      const trace = {{
+        x: plies,
+        y: evals,
+        type: 'bar',
+        marker: {{ color: colors.slice() }},
+      }};
+      const layout = {{
+        title: 'Engine Evaluation by Ply',
+        xaxis: {{ title: 'Ply' }},
+        yaxis: {{ title: 'Centipawns' }},
+        margin: {{ l: 50, r: 20, t: 36, b: 40 }},
+        height: {eval_extra_height - 20},
+        shapes: [{{ type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 0, y1: 0, line: {{ dash: 'dot', color: '#888' }} }}],
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: {{ color: '#d1d5db' }},
+      }};
+      const evalDiv = document.getElementById('{viewer_id}-eval');
+      Plotly.newPlot(evalDiv, [trace], layout, {{ displaylogo: false, responsive: true }}).then(() => {{
+        window._evalChart = evalDiv;
+        // click bar → jump board
+        evalDiv.on('plotly_click', function(data) {{
+          if (data.points && data.points.length > 0) {{
+            const ply = data.points[0].x;
+            window.goTo(ply);
+          }}
+        }});
+        // initial highlight
+        updateEvalHighlight(window.currentPly);
+      }});
+
+      window.updateEvalHighlight = function(ply) {{
+        const newColors = plies.map(p => p === ply ? highlightColor : defaultColor);
+        Plotly.restyle(evalDiv, {{ 'marker.color': [newColors] }});
+      }};
+    }})();
+    </script>
+    """
+
+    html = html + eval_chart_html
+
+    # Height: board + controls + move list + optional eval chart
+    st.components.v1.html(html, height=size + 280 + eval_extra_height)
 
 
 def render_pgn_viewer(
