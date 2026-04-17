@@ -1,0 +1,104 @@
+from datetime import datetime
+
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Player(Base):
+    __tablename__ = "players"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(120))
+
+
+class Game(Base):
+    __tablename__ = "games"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    played_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), index=True)
+    opponent_name: Mapped[str] = mapped_column(String(120))
+    color: Mapped[str] = mapped_column(String(8))
+    result: Mapped[str] = mapped_column(String(32))
+    player_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    opponent_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    time_control: Mapped[str] = mapped_column(String(32))
+    white_username: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    black_username: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    white_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    black_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_pgn: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    winner_username: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    opening_ply_1: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    opening_ply_2: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    opening_ply_3: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    opening_ply_4: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    opening_ply_5: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    eco_code: Mapped[str] = mapped_column(String(8), default="")
+    opening_name: Mapped[str] = mapped_column(String(120), default="")
+    lichess_opening: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    pgn: Mapped[str] = mapped_column(Text, default="")
+
+    player: Mapped[Player] = relationship()
+    analysis: Mapped["GameAnalysis | None"] = relationship(back_populates="game", uselist=False)
+    participants: Mapped[list["GameParticipant"]] = relationship(back_populates="game", cascade="all, delete-orphan")
+
+
+class GameParticipant(Base):
+    __tablename__ = "game_participants"
+    __table_args__ = (UniqueConstraint("game_id", "player_id", name="uq_game_participant"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[str] = mapped_column(ForeignKey("games.id"), index=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), index=True)
+    color: Mapped[str] = mapped_column(String(8))
+    opponent_username: Mapped[str] = mapped_column(String(120))
+    player_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    opponent_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result: Mapped[str] = mapped_column(String(32))
+    quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    blunder_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    game: Mapped[Game] = relationship(back_populates="participants")
+    player: Mapped[Player] = relationship()
+
+
+class GameAnalysis(Base):
+    __tablename__ = "game_analysis"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[str] = mapped_column(ForeignKey("games.id"), unique=True, index=True)
+    summary_cp: Mapped[float] = mapped_column(Float, default=0.0)
+
+    game: Mapped[Game] = relationship(back_populates="analysis")
+    moves: Mapped[list["MoveAnalysis"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
+
+
+class OpeningBook(Base):
+    __tablename__ = "opening_book"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    eco: Mapped[str] = mapped_column(String(8), index=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    pgn: Mapped[str] = mapped_column(Text)
+    epd: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+
+
+class MoveAnalysis(Base):
+    __tablename__ = "move_analysis"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    analysis_id: Mapped[int] = mapped_column(ForeignKey("game_analysis.id"), index=True)
+    ply: Mapped[int] = mapped_column(Integer)
+    san: Mapped[str] = mapped_column(String(32))
+    fen: Mapped[str] = mapped_column(Text)
+    cp_eval: Mapped[float] = mapped_column(Float)
+    best_move: Mapped[str] = mapped_column(String(32), default="")
+    arrow_uci: Mapped[str] = mapped_column(String(8), default="")
+
+    analysis: Mapped[GameAnalysis] = relationship(back_populates="moves")

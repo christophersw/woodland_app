@@ -1,0 +1,475 @@
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Any
+
+import pandas as pd
+import requests
+from sqlalchemy import or_, text
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.services.history_service import HistoryFilters, HistoryService
+from app.config import get_settings
+from app.storage.database import get_session, init_db
+from app.storage.models import Game, GameAnalysis, GameParticipant, Player
+
+
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+DEFAULT_ANTHROPIC_MODEL = "claude-3-haiku-20240307"
+MAX_RESULTS = 200
+
+
+@dataclass(frozen=True)
+class SearchPlan:
+    sql_query: str
+    reasoning: str = ""
+    raw_response: str = ""
+    candidate_sql: str = ""
+    parsed_plan: dict[str, Any] | None = None
+
+
+class SearchPlanError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_response: str = "",
+        parsed_plan: dict[str, Any] | None = None,
+        reasoning: str = "",
+        candidate_sql: str = "",
+    ):
+        super().__init__(message)
+        self.raw_response = raw_response
+        self.parsed_plan = parsed_plan or {}
+        self.reasoning = reasoning
+        self.candidate_sql = candidate_sql
+
+
+@lru_cache(maxsize=1)
+def _schema_context() -> str:
+    return """
+You convert natural-language game search requests into safe PostgreSQL SELECT queries.
+Return JSON only with keys: sql_query, reasoning.
+
+STRICT RULES:
+- Query only from `games` table.
+- One SELECT statement only.
+- No INSERT/UPDATE/DELETE/DDL.
+- No JOIN, UNION, INTERSECT, EXCEPT.
+- Prefer `SELECT * FROM games ...` so rows can be shown directly.
+- Use LIMIT <= 200.
+- Use ILIKE for fuzzy text search on names and openings.
+- For recent games, order by played_at DESC.
+
+Schema:
+CREATE TABLE games (
+  id VARCHAR(64) PRIMARY KEY,
+  played_at TIMESTAMP,
+  white_username VARCHAR(120),   -- Chess.com username of white player
+  black_username VARCHAR(120),   -- Chess.com username of black player
+  white_rating INTEGER,
+  black_rating INTEGER,
+  result_pgn VARCHAR(16),        -- PGN result: '1-0' (white wins), '0-1' (black wins), '1/2-1/2' (draw)
+  winner_username VARCHAR(120),  -- username of the winner, NULL for draws
+  time_control VARCHAR(32),      -- e.g. '600', '180+2', '900+10'
+  eco_code VARCHAR(8),           -- e.g. 'B90', 'C50'
+  opening_name VARCHAR(120),     -- Chess.com opening name, e.g. 'Sicilian Defense'
+  lichess_opening VARCHAR(200),  -- Lichess opening name (more specific), e.g. 'Sicilian Defense: Najdorf Variation'
+  pgn TEXT
+);
+
+KEY DATA RULES:
+- winner_username is the username of the player who won. It is NULL for draws.
+- To find games a player WON: winner_username ILIKE '%player%'
+- To find games a player LOST: they played (white or black) but did NOT win:
+    (white_username ILIKE '%player%' OR black_username ILIKE '%player%')
+    AND winner_username IS NOT NULL AND winner_username NOT ILIKE '%player%'
+- To find ALL games involving a player: check BOTH white_username and black_username.
+- To find draws: result_pgn = '1/2-1/2' or winner_username IS NULL.
+- Usernames are case-insensitive Chess.com handles. Always use ILIKE for matching.
+
+Example queries:
+
+-- All games player "chris" won:
+SELECT * FROM games
+WHERE winner_username ILIKE '%chris%'
+ORDER BY played_at DESC LIMIT 100
+
+-- Games chris won against breakhappy:
+SELECT * FROM games
+WHERE winner_username ILIKE '%chris%'
+  AND (white_username ILIKE '%breakhappy%' OR black_username ILIKE '%breakhappy%')
+ORDER BY played_at DESC LIMIT 100
+
+-- Games chris lost against breakhappy:
+SELECT * FROM games
+WHERE winner_username ILIKE '%breakhappy%'
+  AND (white_username ILIKE '%chris%' OR black_username ILIKE '%chris%')
+ORDER BY played_at DESC LIMIT 100
+
+-- All games between two players (any result):
+SELECT * FROM games
+WHERE (white_username ILIKE '%chris%' AND black_username ILIKE '%breakhappy%')
+   OR (white_username ILIKE '%breakhappy%' AND black_username ILIKE '%chris%')
+ORDER BY played_at DESC LIMIT 100
+
+-- All games involving a player:
+SELECT * FROM games
+WHERE white_username ILIKE '%hikaru%' OR black_username ILIKE '%hikaru%'
+ORDER BY played_at DESC LIMIT 100
+
+-- Losses as black in a specific opening (search both opening columns):
+SELECT * FROM games
+WHERE black_username ILIKE '%chris%'
+  AND winner_username NOT ILIKE '%chris%'
+  AND (opening_name ILIKE '%sicilian%' OR lichess_opening ILIKE '%sicilian%')
+ORDER BY played_at DESC LIMIT 100
+
+-- All Ruy Lopez games:
+SELECT * FROM games
+WHERE lichess_opening ILIKE '%ruy lopez%'
+ORDER BY played_at DESC LIMIT 100
+
+-- Queen's Gambit games:
+SELECT * FROM games
+WHERE lichess_opening ILIKE '%queen%gambit%'
+ORDER BY played_at DESC LIMIT 100
+
+-- Games in the last 30 days:
+SELECT * FROM games
+WHERE played_at >= NOW() - INTERVAL '30 days'
+ORDER BY played_at DESC LIMIT 100
+
+-- All draws:
+SELECT * FROM games WHERE result_pgn = '1/2-1/2' ORDER BY played_at DESC LIMIT 100
+
+COMMON OPENING NAMES (lichess_opening column, most frequent first):
+Scandinavian Defense, Queen's Pawn Game: Accelerated London System, Pirc Defense,
+Philidor Defense, Ponziani Opening, Caro-Kann Defense, Bishop's Opening, Czech Defense,
+King's Pawn Game, Rapport-Jobava System, Queen's Pawn Game: Chigorin Variation,
+Scotch Game, Sicilian Defense: Alapin Variation, Sicilian Defense: Smith-Morra Gambit,
+Bishop's Opening: Ponziani Gambit, Queen's Pawn Game, King's Pawn Game: Leonardis Variation,
+French Defense: Advance Variation, Queen's Pawn Game: Zukertort Variation,
+Sicilian Defense: Bowdler Attack, Italian Game: Two Knights Defense,
+Zukertort Opening, Englund Gambit, King's Indian Attack, French Defense: Knight Variation,
+English Opening, Sicilian Defense: Old Sicilian, Caro-Kann Defense: Advance Variation,
+King's Pawn Game: Wayward Queen Attack, Italian Game: Anti-Fried Liver Defense,
+Hungarian Opening, Italian Game: Paris Defense, Bishop's Opening: Berlin Defense,
+Scandinavian Defense: Icelandic-Palme Gambit, Modern Defense,
+Italian Game: Giuoco Pianissimo, Caro-Kann Defense: Hillbilly Attack,
+English Opening: Anglo-Scandinavian Defense, Italian Game, Sicilian Defense,
+Petrov's Defense, Queen's Pawn Game: London System, Center Game,
+Sicilian Defense: Modern Variations, Caro-Kann Defense: Exchange Variation,
+Caro-Kann Defense: Classical Variation, Italian Game: Two Knights Defense,
+Nimzowitsch Defense, French Defense: Steinitz Attack, Italian Game: Blackburne-Kostić Gambit,
+Vienna Game: Stanley Variation, English Opening: King's English Variation,
+King's Indian Attack, Sicilian Defense: Najdorf Variation,
+King's Pawn Game: Damiano Defense, French Defense: Exchange Variation,
+Three Knights Opening, Italian Game: Rousseau Gambit,
+English Opening: Agincourt Defense, Indian Defense, Sicilian Defense: Closed,
+Ruy Lopez: Berlin Defense, Petrov's Defense: Three Knights Game,
+Englund Gambit Declined, Italian Game: Giuoco Pianissimo,
+Caro-Kann Defense: Advance Variation: Short Variation, Van't Kruijs Opening,
+Horwitz Defense, Bishop's Opening: Urusov Gambit,
+French Defense: Advance Variation: Nimzowitsch System,
+English Opening: Symmetrical Variation, Owen Defense,
+English Opening: Reversed Closed Sicilian, Caro-Kann Defense: Endgame Offer,
+Four Knights Game: Italian Variation, Indian Defense,
+King's Pawn Game: Kiddie Countergambit, French Defense,
+Italian Game: Classical Variation: Giuoco Pianissimo
+
+When users mention an opening by name, use ILIKE with %name% on the lichess_opening column.
+Use broad matches — e.g. '%sicilian%' for any Sicilian, '%caro%kann%' for Caro-Kann.
+""".strip()
+
+
+def is_anthropic_available() -> bool:
+    return bool(get_settings().anthropic_api_key.strip())
+
+
+def get_anthropic_model() -> str:
+    configured = get_settings().anthropic_model.strip()
+    return configured or DEFAULT_ANTHROPIC_MODEL
+
+
+def _extract_text(response_json: dict[str, Any]) -> str:
+    parts = []
+    for item in response_json.get("content", []):
+        if item.get("type") == "text":
+            parts.append(item.get("text", ""))
+    return "\n".join([p for p in parts if p]).strip()
+
+
+def _extract_json(raw_text: str) -> dict[str, Any]:
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("Claude did not return valid JSON.")
+    return json.loads(cleaned[start : end + 1])
+
+
+def _sanitize_sql(candidate_sql: str) -> str:
+    if not candidate_sql:
+        raise ValueError("Claude did not generate SQL.")
+
+    sql = candidate_sql.strip()
+    if sql.startswith("```"):
+        sql = re.sub(r"^```(?:sql)?\s*", "", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\s*```$", "", sql)
+
+    sql = sql.strip().rstrip(";").strip()
+    if ";" in sql:
+        raise ValueError("Only one SQL statement is allowed.")
+
+    lowered = sql.lower()
+    if not lowered.startswith("select"):
+        raise ValueError("Only SELECT is allowed.")
+
+    blocked_terms = [
+        "insert",
+        "update",
+        "delete",
+        "drop",
+        "alter",
+        "truncate",
+        "grant",
+        "revoke",
+        "create",
+        "copy",
+        "merge",
+    ]
+    for term in blocked_terms:
+        if re.search(rf"\b{term}\b", lowered):
+            raise ValueError(f"Unsafe SQL keyword: {term}")
+
+    if re.search(r"\b(join|union|intersect|except)\b", lowered):
+        raise ValueError("Query must target games only without joins/unions.")
+
+    games_from_pattern = re.compile(
+        r"\bfrom\s+(?:\"?[a-z_][a-z0-9_]*\"?\.)?\"?games\"?(?:\s+(?:as\s+)?[a-z_][a-z0-9_]*)?\b",
+        flags=re.IGNORECASE,
+    )
+    if not games_from_pattern.search(sql):
+        raise ValueError("Query must select from games table.")
+
+    limit_match = re.search(r"\blimit\s+(\d+)\b", sql, flags=re.IGNORECASE)
+    if limit_match:
+        n = int(limit_match.group(1))
+        if n > MAX_RESULTS:
+            sql = re.sub(r"\blimit\s+\d+\b", f"LIMIT {MAX_RESULTS}", sql, flags=re.IGNORECASE)
+    else:
+        sql = f"{sql} LIMIT {MAX_RESULTS}"
+
+    return sql
+
+
+def generate_search_plan(user_query: str) -> SearchPlan:
+    query = user_query.strip()
+    if not query:
+        raise ValueError("Please enter a search query.")
+
+    api_key = get_settings().anthropic_api_key.strip()
+    if not api_key:
+        raise SearchPlanError("ANTHROPIC_API_KEY is not configured.")
+
+    payload = {
+        "model": get_anthropic_model(),
+        "max_tokens": 500,
+        "temperature": 0,
+        "system": [
+            {
+                "type": "text",
+                "text": (
+                    "You generate safe SQL search plans for games. "
+                    "Return JSON only with sql_query and reasoning."
+                ),
+            },
+            {
+                "type": "text",
+                "text": _schema_context(),
+                "cache_control": {"type": "ephemeral"},
+            },
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "User request:\n"
+                            f"{query}\n\n"
+                            "Return only JSON with sql_query and reasoning."
+                        ),
+                    }
+                ],
+            }
+        ],
+    }
+
+    response = requests.post(
+        ANTHROPIC_API_URL,
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json=payload,
+        timeout=45,
+    )
+    if not response.ok:
+        raise SearchPlanError(f"Anthropic API error {response.status_code}: {response.text[:500]}")
+
+    raw_text = _extract_text(response.json())
+    if not raw_text:
+        raise SearchPlanError("Claude returned an empty response.")
+
+    try:
+        parsed = _extract_json(raw_text)
+    except Exception as exc:
+        raise SearchPlanError("Claude did not return valid JSON.", raw_response=raw_text) from exc
+
+    reasoning = str(parsed.get("reasoning", "")).strip()
+    candidate_sql = str(parsed.get("sql_query", "")).strip()
+
+    try:
+        sql_query = _sanitize_sql(candidate_sql)
+    except Exception as exc:
+        raise SearchPlanError(
+            str(exc),
+            raw_response=raw_text,
+            parsed_plan=parsed,
+            reasoning=reasoning,
+            candidate_sql=candidate_sql,
+        ) from exc
+
+    return SearchPlan(
+        sql_query=sql_query,
+        reasoning=reasoning,
+        raw_response=raw_text,
+        candidate_sql=candidate_sql,
+        parsed_plan=parsed,
+    )
+
+
+def execute_sql_search(sql_query: str) -> list[dict[str, Any]]:
+    init_db()
+    with get_session() as session:
+        try:
+            result = session.execute(text(sql_query))
+            return [dict(row) for row in result.mappings().all()]
+        except SQLAlchemyError as exc:
+            raise ValueError(f"Generated SQL failed to execute: {exc}") from exc
+
+
+def keyword_game_search(query: str, limit: int = 200) -> pd.DataFrame:
+    init_db()
+    q = query.strip()
+    if not q:
+        return pd.DataFrame()
+
+    like = f"%{q}%"
+    with get_session() as session:
+        has_participants = session.query(GameParticipant.id).limit(1).first() is not None
+
+        if has_participants:
+            rows = (
+                session.query(Game, GameParticipant, Player, GameAnalysis.summary_cp)
+                .join(GameParticipant, GameParticipant.game_id == Game.id)
+                .join(Player, Player.id == GameParticipant.player_id)
+                .outerjoin(GameAnalysis, GameAnalysis.game_id == Game.id)
+                .filter(
+                    or_(
+                        Player.username.ilike(like),
+                        GameParticipant.opponent_username.ilike(like),
+                        GameParticipant.result.ilike(like),
+                        GameParticipant.color.ilike(like),
+                        Game.time_control.ilike(like),
+                        Game.eco_code.ilike(like),
+                        Game.opening_name.ilike(like),
+                        Game.lichess_opening.ilike(like),
+                        Game.white_username.ilike(like),
+                        Game.black_username.ilike(like),
+                        Game.pgn.ilike(like),
+                    )
+                )
+                .order_by(Game.played_at.desc())
+                .limit(limit)
+                .all()
+            )
+        else:
+            # Legacy fallback for pre-participant datasets.
+            rows = (
+                session.query(Game, Player, GameAnalysis.summary_cp)
+                .join(Player, Player.id == Game.player_id)
+                .outerjoin(GameAnalysis, GameAnalysis.game_id == Game.id)
+                .filter(
+                    or_(
+                        Player.username.ilike(like),
+                        Game.opponent_name.ilike(like),
+                        Game.result.ilike(like),
+                        Game.color.ilike(like),
+                        Game.time_control.ilike(like),
+                        Game.eco_code.ilike(like),
+                        Game.opening_name.ilike(like),
+                        Game.lichess_opening.ilike(like),
+                        Game.white_username.ilike(like),
+                        Game.black_username.ilike(like),
+                        Game.pgn.ilike(like),
+                    )
+                )
+                .order_by(Game.played_at.desc())
+                .limit(limit)
+                .all()
+            )
+
+    data = []
+    if has_participants:
+        for game, participant, player, summary_cp in rows:
+            data.append(
+                {
+                    "game_id": game.id,
+                    "played_at": game.played_at,
+                    "player": player.username,
+                    "opponent": participant.opponent_username,
+                    "color": participant.color,
+                    "result": participant.result,
+                    "time_control": game.time_control,
+                    "opening": game.opening_name,
+                    "lichess_opening": game.lichess_opening,
+                    "pgn": game.pgn,
+                    "stockfish_cp": int(summary_cp or 0),
+                }
+            )
+    else:
+        for game, player, summary_cp in rows:
+            data.append(
+                {
+                    "game_id": game.id,
+                    "played_at": game.played_at,
+                    "player": player.username,
+                    "opponent": game.opponent_name,
+                    "color": game.color,
+                    "result": game.result,
+                    "time_control": game.time_control,
+                    "opening": game.opening_name,
+                    "lichess_opening": game.lichess_opening,
+                    "pgn": game.pgn,
+                    "stockfish_cp": int(summary_cp or 0),
+                }
+            )
+    return pd.DataFrame(data)
+
+
+def recent_games_for_player(player: str, limit: int = 200) -> pd.DataFrame:
+    filters = HistoryFilters(player=player, lookback_days=3650, recent_limit=limit)
+    service = HistoryService()
+    return service.get_recent_games_with_eval(filters)
