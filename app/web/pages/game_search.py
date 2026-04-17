@@ -20,28 +20,15 @@ from app.services.game_search_service import (
     is_anthropic_available,
     keyword_game_search,
 )
-from app.services.time_control import format_time_control
 from app.storage.database import get_session
 from app.storage.models import Game
 from app.services.opening_book import opening_at_each_ply
-from app.web.components.charts import opening_starburst_chart
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-VISIBLE_COLUMNS = {
-    "white_username", "black_username", "lichess_opening", "result_pgn",
-    "player", "opponent", "result", "opening",
-}
-
-
-def _column_config(df: pd.DataFrame) -> dict:
-    cfg: dict = {}
-    for col in df.columns:
-        if col not in VISIBLE_COLUMNS:
-            cfg[col] = None
-    return cfg
+DATE_COLUMN_CANDIDATES = ("played_at", "date", "game_date", "end_time", "start_time")
 
 
 def _ensure_pgn(df: pd.DataFrame) -> pd.DataFrame:
@@ -129,8 +116,8 @@ def _ensure_opening_plies(df: pd.DataFrame, depth: int = 5) -> pd.DataFrame:
     return working
 
 
-def _board_animation_html(pgn_text: str, max_ply: int = 10, interval_ms: int = 700) -> str:
-    """Return self-contained HTML that animates the first max_ply half-moves frame by frame."""
+def _board_animation_html(pgn_text: str, max_ply: int | None = None, interval_ms: int = 700) -> str:
+    """Return self-contained HTML that animates a game frame by frame."""
     pgn_text = str(pgn_text or "").strip()
     if not pgn_text:
         return ""
@@ -140,17 +127,20 @@ def _board_animation_html(pgn_text: str, max_ply: int = 10, interval_ms: int = 7
     board = game.board()
     frames: list[str] = [chess.svg.board(board, size=360)]  # starting position
     last_move = None
+    total_plies = 0
     for i, move in enumerate(game.mainline_moves(), start=1):
         last_move = move
         board.push(move)
         frames.append(chess.svg.board(board, lastmove=last_move, size=360))
-        if i >= max_ply:
+        total_plies = i
+        if max_ply is not None and i >= max_ply:
             break
     if len(frames) <= 1:
         return frames[0] if frames else ""
 
     # Get opening names for each ply from the Lichess book.
-    ply_names = opening_at_each_ply(pgn_text, max_ply=max_ply)
+    book_depth = max_ply if max_ply is not None else max(total_plies, 1)
+    ply_names = opening_at_each_ply(pgn_text, max_ply=book_depth)
     # Pad to match frame count if needed.
     while len(ply_names) < len(frames):
         ply_names.append(ply_names[-1] if ply_names else ("", "Starting Position"))
@@ -230,51 +220,69 @@ def _render_results(results_df: pd.DataFrame) -> None:
     enriched = _ensure_pgn(results_df)
     enriched = _ensure_opening_plies(enriched)
 
-    # Add a per-row View link column
+    # Prepare display values.
     table_df = enriched.copy()
-    if "time_control" in table_df.columns:
-        table_df["time_control"] = table_df["time_control"].apply(format_time_control)
-    if "game_id" in table_df.columns:
-        table_df["view"] = table_df["game_id"].apply(
-            lambda gid: f"/game-analysis?game_id={gid}" if pd.notna(gid) and str(gid).strip() else None
-        )
+    if "played_at" in table_df.columns:
+        played_dt = pd.to_datetime(table_df["played_at"], errors="coerce")
+        table_df["played_at"] = played_dt.dt.strftime("%Y-%m-%d").fillna(table_df["played_at"].astype(str))
 
     st.markdown("---")
 
-    # Two-column layout: results table (left, wider) + board preview (right)
+    # Two-column layout: results list (left, wider) + board preview (right)
     table_col, board_col = st.columns([2, 1])
+
+    selected_row_idx = st.session_state.get("search_preview_idx")
+    if selected_row_idx is not None and (
+        selected_row_idx < 0 or selected_row_idx >= len(enriched)
+    ):
+        selected_row_idx = None
 
     with table_col:
         st.markdown("### Results")
-        st.caption(f"Showing {len(enriched)} games. Click a row to preview, or View to open analysis.")
-        col_cfg = _column_config(table_df)
-        if "view" in table_df.columns:
-            col_cfg["view"] = st.column_config.LinkColumn(
-                "View", display_text="View", help="Open game analysis", width="small"
-            )
+        st.caption(f"Showing {len(enriched)} games. Select a row to preview.")
+
+        date_col = next((c for c in DATE_COLUMN_CANDIDATES if c in table_df.columns), None)
+        preferred_order = [
+            "played_at",
+            "date",
+            "game_date",
+            "end_time",
+            "start_time",
+            "white_username",
+            "black_username",
+            "player",
+            "opponent",
+            "color",
+            "lichess_opening",
+            "opening",
+            "stockfish_cp",
+        ]
+        display_cols = [c for c in preferred_order if c in table_df.columns]
+        if date_col and date_col in display_cols:
+            display_cols.remove(date_col)
+            display_cols.insert(0, date_col)
+        if not display_cols:
+            display_cols = [
+                c for c in table_df.columns
+                if c not in {"pgn", "game_id", "result", "result_pgn", "time_control"}
+            ]
+
+        column_config = {
+            col: st.column_config.Column(col.replace("_", " ").title()) for col in display_cols
+        }
         table_event = st.dataframe(
-            table_df,
+            table_df[display_cols],
             width='stretch',
+            height=560,
             hide_index=True,
-            column_config=col_cfg,
+            column_config=column_config,
             on_select="rerun",
             selection_mode="single-row",
             key="results_table",
         )
-
-    # Determine which row was selected
-    selected_row_idx = None
-    if table_event and table_event.selection and table_event.selection.rows:
-        selected_row_idx = table_event.selection.rows[0]
-
-    # Button for in-app navigation of the selected game
-    if selected_row_idx is not None and selected_row_idx < len(enriched):
-        sel_row = enriched.iloc[selected_row_idx]
-        sel_game_id = sel_row.get("game_id", "")
-        if sel_game_id:
-            if st.button("Open in Analysis", key="search_load_game", width='content'):
-                st.session_state["pending_game_id"] = str(sel_game_id)
-                st.switch_page("app/web/pages/game_analysis.py")
+        if table_event and table_event.selection and table_event.selection.rows:
+            selected_row_idx = table_event.selection.rows[0]
+            st.session_state["search_preview_idx"] = selected_row_idx
 
     with board_col:
         st.markdown("### Board Preview")
@@ -291,24 +299,24 @@ def _render_results(results_df: pd.DataFrame) -> None:
                 st.caption(f"**{opening}**")
             st.caption(f"{white} vs {black} — {result}")
 
-            anim_html = _board_animation_html(pgn_text, max_ply=10, interval_ms=700)
+            game_id = row.get("game_id", "")
+            can_open = pd.notna(game_id) and str(game_id).strip() != ""
+            if st.button(
+                "Open in Analysis",
+                key="search_open_preview",
+                width='content',
+                disabled=not can_open,
+            ):
+                st.session_state["pending_game_id"] = str(game_id)
+                st.switch_page("app/web/pages/game_analysis.py")
+
+            anim_html = _board_animation_html(pgn_text, max_ply=None, interval_ms=700)
             if anim_html:
                 st.components.v1.html(anim_html, height=430)
             else:
                 st.info("No PGN available for this game.")
         else:
-            st.info("Select a row to preview its opening position.")
-
-    # --- Starburst chart ---
-    st.markdown("### Opening Star-burst")
-    fig = opening_starburst_chart(enriched, depth=5)
-    if fig is not None:
-        st.plotly_chart(
-            fig, width='stretch',
-            config={"displaylogo": False, "plotlyServerURL": ""},
-        )
-    else:
-        st.info("Not enough PGN data to build starburst.")
+            st.info("Select a row to preview the full game.")
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +330,6 @@ st.caption("Search your games and preview openings.")
 
 anthropic_available = is_anthropic_available()
 if anthropic_available:
-    st.success(f"AI SQL parsing enabled ({get_anthropic_model()}).")
     search_mode = st.radio("Search mode", ["AI-Powered Search", "Keyword Search"], horizontal=True)
 else:
     st.warning("ANTHROPIC_API_KEY not configured. Keyword search only.")

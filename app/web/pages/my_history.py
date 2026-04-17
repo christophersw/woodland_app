@@ -102,34 +102,36 @@ with left:
         display_df = recent_df.copy()
         if "time_control" in display_df.columns:
             display_df["time_control"] = display_df["time_control"].apply(format_time_control)
-        if "game_id" in display_df.columns:
-            display_df["view"] = display_df["game_id"].apply(
-                lambda gid: f"/game-analysis?game_id={gid}" if pd.notna(gid) and str(gid).strip() else None
-            )
-        cols = ["played_at", "opponent", "color", "result", "time_control", "stockfish_cp", "game_id", "view"]
+        cols = ["played_at", "opponent", "color", "result", "time_control", "stockfish_cp", "game_id"]
         display_cols = [c for c in cols if c in display_df.columns]
-        table_event = st.dataframe(
-            display_df[display_cols],
-            width='stretch',
-            hide_index=True,
-            column_config={
-                "game_id": None,
-                "view": st.column_config.LinkColumn(
-                    "View", display_text="View", help="Open game analysis", width="small"
-                ),
-            },
-            on_select="rerun",
-            selection_mode="single-row",
-            key="history_table",
-        )
-        if table_event and table_event.selection and table_event.selection.rows:
-            sel_idx = table_event.selection.rows[0]
-            sel_game_id = str(display_df.iloc[sel_idx]["game_id"])
-            if st.button("Open in Analysis", key="history_load_game", width='stretch'):
-                st.session_state["pending_game_id"] = sel_game_id
+
+        header_cols = st.columns([*([1] * len(display_cols)), 1.2])
+        for idx, col_name in enumerate(display_cols):
+            if col_name == "game_id":
+                continue
+            header_cols[idx].markdown(f"**{col_name.replace('_', ' ').title()}**")
+        header_cols[-1].markdown("**Open**")
+
+        for row_idx, row in display_df.reset_index(drop=True).iterrows():
+            row_cols = st.columns([*([1] * len(display_cols)), 1.2])
+            for col_idx, col_name in enumerate(display_cols):
+                if col_name == "game_id":
+                    continue
+                value = row.get(col_name, "")
+                row_cols[col_idx].write("" if pd.isna(value) else str(value))
+
+            game_id = row.get("game_id", "")
+            can_open = pd.notna(game_id) and str(game_id).strip() != ""
+            if row_cols[-1].button(
+                "Open in Analysis",
+                key=f"history_open_{row_idx}",
+                width='content',
+                disabled=not can_open,
+            ):
+                st.session_state["pending_game_id"] = str(game_id)
                 st.switch_page("app/web/pages/game_analysis.py")
 
 with right:
     st.plotly_chart(opening_pie_chart(opening_df), width='stretch', config={"displaylogo": False, "plotlyServerURL": ""})
 
-st.caption("Select a row and click Load Game to open it in Game Analysis.")
+st.caption("Use Open in Analysis on any row to open that game.")
