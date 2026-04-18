@@ -2,5 +2,8 @@
   "packages": {
     "python": "3.11"
   },
+  "install": [
+    "pip install -e ."
+  ],
   "deployAptPackages": ["stockfish"]
 }
