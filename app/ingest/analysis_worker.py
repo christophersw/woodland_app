@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import logging
 import socket
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import select, and_, func
 from tqdm import tqdm
+
+_IS_TTY = sys.stdout.isatty()
 
 from app.services.stockfish_service import analyze_pgn
 from app.storage.database import ENGINE, get_session, init_db
@@ -196,7 +199,7 @@ def run_worker(stockfish_path: str, depth: int = 20, threads: int = 1, poll_inte
         total = min(total, limit)
 
     processed = 0
-    bar = tqdm(total=total, unit="game", desc="Analyzing", dynamic_ncols=True)
+    bar = tqdm(total=total, unit="game", desc="Analyzing", dynamic_ncols=True) if _IS_TTY else None
 
     try:
         while True:
@@ -212,15 +215,20 @@ def run_worker(stockfish_path: str, depth: int = 20, threads: int = 1, poll_inte
                 time.sleep(poll_interval)
                 continue
 
-            bar.set_postfix_str(f"game {job.game_id[:16]}")
-            move_bar = tqdm(total=None, unit="move", desc="  Move", leave=False,
-                            dynamic_ncols=True, position=1)
+            if bar:
+                bar.set_postfix_str(f"game {job.game_id[:16]}")
+            move_bar = (
+                tqdm(total=None, unit="move", desc="  Move", leave=False, dynamic_ncols=True, position=1)
+                if _IS_TTY else None
+            )
             try:
                 pgn_text = _load_pgn(job.game_id)
                 if not pgn_text:
                     raise ValueError("No PGN for game")
 
                 def on_move(ply: int, total: int, san: str) -> None:
+                    if move_bar is None:
+                        return
                     if move_bar.total != total:
                         move_bar.total = total
                         move_bar.refresh()
@@ -233,18 +241,29 @@ def run_worker(stockfish_path: str, depth: int = 20, threads: int = 1, poll_inte
                 _save_analysis(job, result)
                 _mark_completed(job.id)
                 processed += 1
-                bar.update(1)
-                bar.set_postfix_str(
-                    f"W {result.white_stats.accuracy:.0f}%  B {result.black_stats.accuracy:.0f}%"
-                )
+
+                if bar:
+                    bar.update(1)
+                    bar.set_postfix_str(
+                        f"W {result.white_stats.accuracy:.0f}%  B {result.black_stats.accuracy:.0f}%"
+                    )
+                else:
+                    log.info(
+                        "Completed job %d (%d/%s)  game=%s  W=%.1f%%  B=%.1f%%",
+                        job.id, processed, limit or "∞", job.game_id,
+                        result.white_stats.accuracy, result.black_stats.accuracy,
+                    )
 
             except Exception as exc:
                 log.exception("Job %d failed: %s", job.id, exc)
                 _mark_failed(job.id, str(exc))
-                bar.update(1)
+                if bar:
+                    bar.update(1)
             finally:
-                move_bar.close()
+                if move_bar:
+                    move_bar.close()
     finally:
-        bar.close()
+        if bar:
+            bar.close()
 
     log.info("Done. Processed %d game(s).", processed)

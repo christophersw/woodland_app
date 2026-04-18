@@ -41,6 +41,12 @@ def main() -> None:
         icon="🧠",
         url_path="game-search",
     )
+    status_page = st.Page(
+        "app/web/pages/analysis_status.py",
+        title="Analysis Status",
+        icon="📊",
+        url_path="analysis-status",
+    )
 
     authenticated = not settings.auth_enabled or is_authenticated()
 
@@ -49,16 +55,21 @@ def main() -> None:
             _logout = st.Page(logout_page, title="Sign Out", icon="🚪", url_path="logout")
             pages: dict | list = {
                 "": [opening_analysis_page, analysis_page, search_page],
+                "Admin": [status_page],
                 "Account": [_logout],
             }
         else:
             _login = st.Page(login_page, title="Sign In", icon="🔑", url_path="login")
             pages = {
                 "": [opening_analysis_page, analysis_page, search_page],
+                "Admin": [status_page],
                 "Account": [_login],
             }
     else:
-        pages = [opening_analysis_page, analysis_page, search_page]
+        pages = {
+            "": [opening_analysis_page, analysis_page, search_page],
+            "Admin": [status_page],
+        }
 
     nav = st.navigation(pages, position="sidebar")
     render_admin_sidebar()
