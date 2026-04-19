@@ -313,4 +313,6 @@ render_svg_game_viewer(
     initial_ply="last",
     wdl_data=wdl_data,
     eval_data=eval_data,
+    white_player=analysis.white,
+    black_player=analysis.black,
 )
