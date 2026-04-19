@@ -1,9 +1,9 @@
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.storage.database import get_session, init_db
 from app.storage.models import AnalysisJob, WorkerHeartbeat
@@ -13,9 +13,23 @@ require_auth()
 init_db()
 
 _STALE_SECONDS = 120  # worker considered dead if no heartbeat for 2 minutes
+def _prune_stale_heartbeats() -> int:
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=_STALE_SECONDS)
+    with get_session() as s:
+        result = s.execute(
+            delete(WorkerHeartbeat).where(WorkerHeartbeat.last_seen < cutoff)
+        )
+        s.commit()
+        return result.rowcount
 
-st.title("Analysis Status")
-st.caption("Live view of the Stockfish analysis job queue and worker health.")
+
+title_col, cleanup_col = st.columns([8, 2])
+title_col.title("Analysis Status")
+title_col.caption("Live view of the Stockfish analysis job queue and worker health.")
+if cleanup_col.button("Clean up", help="Remove all stale worker records"):
+    pruned = _prune_stale_heartbeats()
+    st.toast(f"Removed {pruned} stale worker record(s).")
+    st.rerun()
 
 auto_refresh = st.toggle("Auto-refresh every 10s", value=False)
 
