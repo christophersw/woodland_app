@@ -1,59 +1,73 @@
 import io
+from datetime import datetime, timedelta
 
 import chess.pgn
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# ── Gentleman's Palette — Light Mode ────────────────────────────────────────
+# ── Du Bois Palette — After the 1900 Paris Exposition plates ─────────────────
 _GP = {
-    "parchment": "#F5EDD8",
-    "linen":     "#EDE0C4",
-    "ebony":     "#1C1C1C",
-    "forest":    "#1E3D2F",
-    "moss":      "#3A5C45",
-    "whisky":    "#C17F24",
-    "peat":      "#7B4F2E",
-    "smoke":     "#4A4A4A",
-    "gilt":      "#B8962E",
+    "parchment": "#F2E6D0",  # warm cream — chart paper
+    "linen":     "#E8D5B0",  # tan — secondary backgrounds
+    "ebony":     "#1A1A1A",  # near-black — text
+    "forest":    "#1A3A2A",  # deep forest — headings, sidebar
+    "moss":      "#4A6554",  # Du Bois green — wins / positive
+    "whisky":    "#D4A843",  # ochre-gold — primary accent
+    "peat":      "#8B3A2A",  # brick-red-brown — losses / negative
+    "smoke":     "#5A5A5A",  # neutral grey
+    "gilt":      "#B8922A",  # deep gold — borders, highlights
+    # move-quality reds — kept intentional but shifted to Du Bois crimson family
+    "crimson":   "#B53541",  # Du Bois crimson — blunder
+    "scarlet":   "#CE3A4A",  # mistake
+    "rose":      "#E07B7B",  # inaccuracy
+    # positives
+    "brilliant": "#2C6B4A",  # brilliant move
+    "steel":     "#4A6E8A",  # Du Bois steel blue — accent/draw
 }
 
-_GP_FONT = "EB Garamond, Georgia, serif"
-_GP_MONO = "DM Mono, Courier New, monospace"
+_GP_FONT  = "EB Garamond, Georgia, serif"
+_GP_MONO  = "DM Mono, Courier New, monospace"
+_GP_TITLE = "Playfair Display SC, Cormorant Garamond, Georgia, serif"
 
+# Du Bois colorway: crimson → gold → green → steel blue → brick → pink → ochre → teal
 _GP_COLORWAY = [
-    "#C17F24", "#B8962E", "#3A5C45", "#7B4F2E",
-    "#9E6B3A", "#5C8A67", "#C4933F", "#4A7A5B",
+    "#B53541", "#D4A843", "#4A6554", "#4A6E8A",
+    "#8B3A2A", "#E07B7B", "#C4933F", "#2C6B4A",
 ]
 
 
 def _gp_layout(**overrides) -> dict:
-    """Return a Plotly layout dict applying the Gentleman's Palette light theme."""
+    """Return a Plotly layout dict applying the Du Bois palette theme."""
     base: dict = dict(
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(237,224,196,0.35)",
+        plot_bgcolor="rgba(242,230,208,0.5)",  # flat cream — no gradient
         font=dict(family=_GP_FONT, color=_GP["ebony"], size=13),
-        title_font=dict(family="Cormorant Garamond, Georgia, serif", size=18, color=_GP["forest"]),
+        title_font=dict(family=_GP_TITLE, size=16, color=_GP["forest"]),
         colorway=_GP_COLORWAY,
         xaxis=dict(
             gridcolor=_GP["linen"],
             gridwidth=1,
-            linecolor=_GP["smoke"],
-            tickfont=dict(family=_GP_MONO, color=_GP["peat"], size=11),
-            title_font=dict(family=_GP_MONO, color=_GP["peat"], size=11),
-            zerolinecolor=_GP["smoke"],
+            linecolor=_GP["ebony"],
+            linewidth=2,
+            tickfont=dict(family=_GP_MONO, color=_GP["smoke"], size=11),
+            title_font=dict(family=_GP_MONO, color=_GP["smoke"], size=11),
+            zerolinecolor=_GP["ebony"],
+            zerolinewidth=2,
         ),
         yaxis=dict(
             gridcolor=_GP["linen"],
             gridwidth=1,
-            linecolor=_GP["smoke"],
-            tickfont=dict(family=_GP_MONO, color=_GP["peat"], size=11),
-            title_font=dict(family=_GP_MONO, color=_GP["peat"], size=11),
-            zerolinecolor=_GP["smoke"],
+            linecolor=_GP["ebony"],
+            linewidth=2,
+            tickfont=dict(family=_GP_MONO, color=_GP["smoke"], size=11),
+            title_font=dict(family=_GP_MONO, color=_GP["smoke"], size=11),
+            zerolinecolor=_GP["ebony"],
+            zerolinewidth=2,
         ),
         legend=dict(
-            bgcolor="rgba(245,237,216,0.8)",
-            bordercolor=_GP["gilt"],
+            bgcolor="rgba(242,230,208,0.9)",
+            bordercolor=_GP["ebony"],
             borderwidth=1,
             font=dict(family=_GP_FONT, color=_GP["ebony"], size=12),
         ),
@@ -100,8 +114,8 @@ def opening_pie_chart(df: pd.DataFrame):
     fig.update_traces(
         textposition="inside",
         textinfo="percent+label",
-        textfont=dict(family=_GP_MONO, size=11),
-        marker=dict(line=dict(color=_GP["ebony"], width=1)),
+        textfont=dict(family=_GP_MONO, size=11, color=_GP["parchment"]),
+        marker=dict(line=dict(color=_GP["ebony"], width=2)),
     )
     fig.update_layout(**_gp_layout())
     return fig
@@ -115,13 +129,13 @@ def eval_timeline_chart(df: pd.DataFrame, selected_ply: int | None = None):
             _GP["whisky"] if int(p) != selected_ply else _GP["gilt"]
             for p in df["ply"].tolist()
         ]
-        fig.update_traces(marker_color=colors)
+        fig.update_traces(marker_color=colors, marker_line_color=_GP["ebony"], marker_line_width=1)
     else:
-        fig.update_traces(marker_color=_GP["whisky"])
+        fig.update_traces(marker_color=_GP["whisky"], marker_line_color=_GP["ebony"], marker_line_width=1)
 
-    # Split background: light gray above zero (white advantage), dark gray below (black advantage)
-    fig.add_hrect(y0=0, y1=2500,  fillcolor="#E8E8E8", opacity=1.0, layer="below", line_width=0)
-    fig.add_hrect(y0=-2500, y1=0, fillcolor="#2A2A2A", opacity=1.0, layer="below", line_width=0)
+    # Split background: warm cream above zero (white advantage), near-black below (black advantage)
+    fig.add_hrect(y0=0, y1=2500,  fillcolor=_GP["parchment"], opacity=1.0, layer="below", line_width=0)
+    fig.add_hrect(y0=-2500, y1=0, fillcolor="#1A1A1A", opacity=1.0, layer="below", line_width=0)
 
     fig.add_hline(y=0, line_dash="dot", line_color=_GP["smoke"])
     fig.update_layout(**_gp_layout(
@@ -237,7 +251,7 @@ def opening_starburst_chart(df: pd.DataFrame, depth: int = 5):
         textinfo="label+text+percent parent",
         hovertemplate="<b>%{label}</b><br>Games: %{value}<br>%{hovertext}<extra></extra>",
         insidetextorientation="auto",
-        marker=dict(colors=_GP_COLORWAY * 20, line=dict(color=_GP["ebony"], width=1)),
+        marker=dict(colors=_GP_COLORWAY * 20, line=dict(color=_GP["ebony"], width=2)),
     ))
     fig.update_layout(**_gp_layout(
         title=f"Opening Star-burst (First {depth} Plies)",
@@ -260,6 +274,7 @@ def opening_frequency_bar(df: pd.DataFrame):
         labels={"opening_label": "Opening", "games": "Games"},
         color_discrete_sequence=[_GP["whisky"]],
     )
+    fig.update_traces(marker_line_color=_GP["ebony"], marker_line_width=1.5)
     fig.update_layout(**_gp_layout(
         yaxis=dict(categoryorder="total ascending"),
         margin=dict(l=10, r=10, t=56, b=10),
@@ -287,15 +302,75 @@ def opening_wdl_stacked(metrics_df: pd.DataFrame):
         labels={"opening_label": "Opening", "count": "Games", "outcome": "Outcome"},
         color_discrete_map={
             "wins":   _GP["moss"],
-            "draws":  _GP["smoke"],
-            "losses": _GP["peat"],
+            "draws":  _GP["steel"],
+            "losses": _GP["crimson"],
         },
     )
+    fig.update_traces(marker_line_color=_GP["ebony"], marker_line_width=1.5)
     fig.update_layout(**_gp_layout(
         barmode="stack",
         xaxis=dict(tickangle=-35),
         margin=dict(l=10, r=10, t=56, b=10),
     ))
+    return fig
+
+
+def welcome_elo_chart(df: pd.DataFrame, recent_days: int = 7) -> go.Figure:
+    """ELO trend chart for all club players.
+
+    All players are shown at full opacity with distinct colours.
+    Data points from the last *recent_days* are rendered as larger markers
+    so recent rating changes stand out at a glance.
+    """
+    if df.empty:
+        return go.Figure()
+
+    fig = go.Figure()
+    cutoff = pd.Timestamp(datetime.utcnow() - timedelta(days=recent_days))
+
+    for i, player in enumerate(sorted(df["player"].unique())):
+        pdata = df[df["player"] == player].sort_values("date")
+        color = _GP_COLORWAY[i % len(_GP_COLORWAY)]
+
+        # Continuous line for the full history
+        fig.add_trace(
+            go.Scatter(
+                x=pdata["date"],
+                y=pdata["rating"],
+                mode="lines",
+                name=player,
+                line=dict(color=color, width=2.5),
+                hovertemplate="%{fullData.name}<br>%{x|%d %b %Y}<br><b>%{y:.0f}</b><extra></extra>",
+            )
+        )
+
+        # Larger markers for recent data points
+        recent = pdata[pdata["date"] >= cutoff]
+        if not recent.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=recent["date"],
+                    y=recent["rating"],
+                    mode="markers",
+                    showlegend=False,
+                    marker=dict(
+                        color=color,
+                        size=11,
+                        symbol="circle",
+                        line=dict(color=_GP["ebony"], width=1.5),
+                    ),
+                    hovertemplate="%{fullData.name}<br>%{x|%d %b %Y}<br><b>%{y:.0f}</b> ★ recent<extra></extra>",
+                )
+            )
+
+    fig.update_layout(
+        **_gp_layout(
+            title_text="Club ELO Trends",
+            legend_title="Player",
+            margin=dict(l=20, r=20, t=56, b=20),
+            hovermode="x unified",
+        )
+    )
     return fig
 
 
@@ -316,11 +391,12 @@ def opening_bubble(metrics_df: pd.DataFrame):
         labels={"games": "Frequency", "win_pct": "Win %", "wins": "Total Wins", "opening_label": "Opening"},
         size_max=45,
         color_continuous_scale=[
-            [0.0, _GP["linen"]],
+            [0.0, _GP["peat"]],
             [0.5, _GP["whisky"]],
-            [1.0, _GP["gilt"]],
+            [1.0, _GP["moss"]],
         ],
     )
+    fig.update_traces(marker_line_color=_GP["ebony"], marker_line_width=1.5)
     fig.update_layout(**_gp_layout(
         showlegend=False,
         margin=dict(l=10, r=10, t=56, b=10),
@@ -354,7 +430,8 @@ def opening_timeline_heatmap(timeline_df: pd.DataFrame, title: str):
             y=yvals,
             colorscale=[
                 [0.0, _GP["parchment"]],
-                [0.5, _GP["whisky"]],
+                [0.4, _GP["whisky"]],
+                [0.7, _GP["crimson"]],
                 [1.0, _GP["forest"]],
             ],
             colorbar=dict(
@@ -386,9 +463,9 @@ def player_fingerprint_radar(df: pd.DataFrame):
             theta=theta,
             fill="toself",
             name="Opening Fingerprint",
-            line=dict(color=_GP["whisky"], width=3),
-            marker=dict(size=8, color=_GP["gilt"]),
-            fillcolor=f"rgba(193,127,36,0.15)",
+            line=dict(color=_GP["crimson"], width=3),
+            marker=dict(size=8, color=_GP["whisky"], line=dict(color=_GP["ebony"], width=1.5)),
+            fillcolor="rgba(181,53,65,0.15)",
         )
     )
     fig.update_layout(**_gp_layout(
@@ -428,14 +505,14 @@ def opening_flow_sankey(flow_df: pd.DataFrame):
                     label=labels,
                     pad=18,
                     thickness=16,
-                    color=_GP["moss"],
-                    line=dict(color=_GP["gilt"], width=0.5),
+                    color=_GP["crimson"],
+                    line=dict(color=_GP["ebony"], width=1),
                 ),
                 link=dict(
                     source=[idx_map[s] for s in flow_df["source"]],
                     target=[idx_map[t] for t in flow_df["target"]],
                     value=flow_df["games"].tolist(),
-                    color=f"rgba(193,127,36,0.25)",
+                    color="rgba(212,168,67,0.30)",
                 ),
             )
         ]
@@ -465,6 +542,8 @@ def opening_wins_losses_bar(metrics_df: pd.DataFrame, top_n: int = 15) -> go.Fig
         x=x_labels,
         y=top["wins"],
         marker_color=_GP["moss"],
+        marker_line_color=_GP["ebony"],
+        marker_line_width=1.5,
         text=top["wins"],
         textposition="outside",
         textfont=dict(family=_GP_MONO, size=11, color=_GP["ebony"]),
@@ -475,7 +554,9 @@ def opening_wins_losses_bar(metrics_df: pd.DataFrame, top_n: int = 15) -> go.Fig
         name="Losses",
         x=x_labels,
         y=-top["losses"],
-        marker_color=_GP["peat"],
+        marker_color=_GP["crimson"],
+        marker_line_color=_GP["ebony"],
+        marker_line_width=1.5,
         text=top["losses"],
         textposition="outside",
         textfont=dict(family=_GP_MONO, size=11, color=_GP["ebony"]),

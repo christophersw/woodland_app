@@ -11,27 +11,97 @@ from app.web.components.auth import (
 )
 
 _GENTLEMAN_CSS = """
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600;1,700&family=EB+Garamond:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  /* ── Gentleman's Palette — Light Mode ── */
+  @font-face {
+    font-family: 'Playfair Display SC';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/app/static/fonts/PlayfairDisplaySC-Regular.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Playfair Display SC';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('/app/static/fonts/PlayfairDisplaySC-Bold.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Cormorant Garamond';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('/app/static/fonts/CormorantGaramond-SemiBold.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Cormorant Garamond';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('/app/static/fonts/CormorantGaramond-SemiBold.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Cormorant Garamond';
+    font-style: italic;
+    font-weight: 600;
+    font-display: swap;
+    src: url('/app/static/fonts/CormorantGaramond-SemiBoldItalic.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Cormorant Garamond';
+    font-style: italic;
+    font-weight: 700;
+    font-display: swap;
+    src: url('/app/static/fonts/CormorantGaramond-SemiBoldItalic.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'EB Garamond';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/app/static/fonts/EBGaramond-Regular.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'EB Garamond';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('/app/static/fonts/EBGaramond-Regular.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'DM Mono';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/app/static/fonts/DMMono-Regular.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'DM Mono';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('/app/static/fonts/DMMono-Medium.woff2') format('woff2');
+  }
+</style>
+<style>
+  /* ── Du Bois Palette — After the 1900 Paris Exposition plates ── */
   :root {
-    --c-parchment: #F5EDD8;
-    --c-linen:     #EDE0C4;
-    --c-ebony:     #1C1C1C;
-    --c-forest:    #1E3D2F;
-    --c-moss:      #3A5C45;
-    --c-whisky:    #C17F24;
-    --c-peat:      #7B4F2E;
-    --c-smoke:     #4A4A4A;
-    --c-gilt:      #B8962E;
-    --c-best:      #123A28;
+    --c-parchment: #F2E6D0;
+    --c-linen:     #E8D5B0;
+    --c-ebony:     #1A1A1A;
+    --c-forest:    #1A3A2A;
+    --c-moss:      #4A6554;
+    --c-whisky:    #D4A843;
+    --c-peat:      #8B3A2A;
+    --c-smoke:     #5A5A5A;
+    --c-gilt:      #B8922A;
+    --c-steel:     #4A6E8A;
+    --c-best:      #1A3A2A;
     --c-brilliant: #2C6B4A;
-    --c-great:     #6FB28E;
-    --c-blunder:   #5C171D;
-    --c-mistake:   #8A2831;
-    --c-inaccuracy:#CC6A72;
+    --c-great:     #5A9E7A;
+    --c-blunder:   #B53541;
+    --c-mistake:   #CE3A4A;
+    --c-inaccuracy:#E07B7B;
   }
 
   /* ── Base typography ── */
@@ -47,22 +117,24 @@ _GENTLEMAN_CSS = """
 
   /* ── Headings ── */
   h1, [data-testid="stHeading"] h1, .stApp h1 {
-    font-family: 'Cormorant Garamond', Georgia, serif !important;
-    font-size: 2.5rem !important;
+    font-family: 'Playfair Display SC', 'Cormorant Garamond', Georgia, serif !important;
+    font-size: 2.2rem !important;
     font-weight: 700 !important;
-    letter-spacing: 0.01em;
+    letter-spacing: 0.04em;
     color: var(--c-forest) !important;
   }
   h2, [data-testid="stHeading"] h2, .stApp h2 {
-    font-family: 'Cormorant Garamond', Georgia, serif !important;
-    font-size: 1.875rem !important;
-    font-weight: 600 !important;
+    font-family: 'Playfair Display SC', 'Cormorant Garamond', Georgia, serif !important;
+    font-size: 1.6rem !important;
+    font-weight: 400 !important;
+    letter-spacing: 0.03em;
     color: var(--c-forest) !important;
   }
   h3, [data-testid="stHeading"] h3, .stApp h3 {
     font-family: 'EB Garamond', Georgia, serif !important;
-    font-size: 1.375rem !important;
+    font-size: 1.25rem !important;
     font-weight: 500 !important;
+    letter-spacing: 0.02em;
     color: var(--c-forest) !important;
   }
 
@@ -95,9 +167,9 @@ _GENTLEMAN_CSS = """
     color: var(--c-ebony) !important;
   }
   [data-testid="stMetric"] {
-    background: rgba(245, 237, 216, 0.32) !important;
-    border: 1px solid var(--c-gilt) !important;
-    border-radius: 4px;
+    background: rgba(242, 230, 208, 0.35) !important;
+    border: 1.5px solid var(--c-ebony) !important;
+    border-radius: 2px;
     padding: 0.45rem 0.65rem !important;
     min-height: 5.5rem !important;
     height: 5.5rem !important;
@@ -171,10 +243,10 @@ _GENTLEMAN_CSS = """
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 4px;
+    border-radius: 2px;
     overflow: hidden;
-    border: 1px solid var(--c-gilt);
-    background: rgba(245, 237, 216, 0.32);
+    border: 1.5px solid var(--c-ebony);
+    background: rgba(242, 230, 208, 0.35);
     box-sizing: border-box;
   }
   .analysis-stat--compact .analysis-stat-card {
@@ -291,7 +363,7 @@ _GENTLEMAN_CSS = """
   /* ── Sidebar ── */
   [data-testid="stSidebar"] {
     background-color: var(--c-forest) !important;
-    border-right: 1px solid var(--c-gilt) !important;
+    border-right: 2px solid var(--c-ebony) !important;
   }
   [data-testid="stSidebar"] * {
     color: var(--c-parchment) !important;
@@ -310,13 +382,13 @@ _GENTLEMAN_CSS = """
   .stButton > button[kind="primary"],
   .stButton > button {
     background: transparent !important;
-    border: 1px solid var(--c-gilt) !important;
+    border: 1.5px solid var(--c-ebony) !important;
     color: var(--c-forest) !important;
     font-family: 'DM Mono', monospace !important;
     font-size: 0.8125rem !important;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    border-radius: 3px;
+    border-radius: 1px;
     padding: 0.5rem 1.25rem;
     transition: background 0.2s, color 0.2s;
   }
@@ -338,8 +410,8 @@ _GENTLEMAN_CSS = """
 
   /* ── Dividers ── */
   hr {
-    border-color: var(--c-gilt) !important;
-    opacity: 0.4;
+    border-color: var(--c-ebony) !important;
+    opacity: 0.25;
     margin: 1.5rem 0;
   }
 
@@ -352,7 +424,7 @@ _GENTLEMAN_CSS = """
     color: var(--c-smoke) !important;
   }
   [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
-    border-bottom-color: var(--c-whisky) !important;
+    border-bottom-color: var(--c-crimson) !important;
     color: var(--c-forest) !important;
   }
 
@@ -364,15 +436,15 @@ _GENTLEMAN_CSS = """
     text-transform: uppercase;
     background: var(--c-linen) !important;
     color: var(--c-forest) !important;
-    border-bottom: 1px solid var(--c-gilt) !important;
+    border-bottom: 2px solid var(--c-ebony) !important;
   }
 
   /* ── Link color ── */
   a, a:visited {
-    color: var(--c-whisky) !important;
+    color: var(--c-blunder) !important;
   }
   a:hover {
-    color: var(--c-peat) !important;
+    color: var(--c-whisky) !important;
   }
 </style>
 """
@@ -390,12 +462,18 @@ def main() -> None:
     # Always register all pages so that direct URL navigation (e.g. from
     # LinkColumn clicks opening a new tab) resolves correctly. Auth is enforced
     # inside each page via require_auth(), not by hiding pages from the router.
+    welcome_page = st.Page(
+        "app/web/pages/welcome.py",
+        title="Welcome",
+        icon="♟",
+        url_path="welcome",
+        default=True,
+    )
     opening_analysis_page = st.Page(
         "app/web/pages/opening_analysis.py",
         title="Opening Analysis",
         icon="🧭",
         url_path="opening-analysis",
-        default=True,
     )
     analysis_page = st.Page(
         "app/web/pages/game_analysis.py",
@@ -422,20 +500,20 @@ def main() -> None:
         if authenticated:
             _logout = st.Page(logout_page, title="Sign Out", icon="🚪", url_path="logout")
             pages: dict | list = {
-                "": [opening_analysis_page, analysis_page, search_page],
+                "": [welcome_page, opening_analysis_page, analysis_page, search_page],
                 "Admin": [status_page],
                 "Account": [_logout],
             }
         else:
             _login = st.Page(login_page, title="Sign In", icon="🔑", url_path="login")
             pages = {
-                "": [opening_analysis_page, analysis_page, search_page],
+                "": [welcome_page, opening_analysis_page, analysis_page, search_page],
                 "Admin": [status_page],
                 "Account": [_login],
             }
     else:
         pages = {
-            "": [opening_analysis_page, analysis_page, search_page],
+            "": [welcome_page, opening_analysis_page, analysis_page, search_page],
             "Admin": [status_page],
         }
 
