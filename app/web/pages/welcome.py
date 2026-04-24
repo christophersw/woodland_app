@@ -8,13 +8,20 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
+from app.services.opening_analysis_service import OpeningAnalysisService
 from app.services.welcome_service import WelcomeService
 from app.web.components.auth import require_auth
-from app.web.components.charts import player_accuracy_chart, player_elo_chart
+from app.web.components.charts import (
+    opening_wins_losses_bar,
+    player_accuracy_chart,
+    player_elo_chart,
+    welcome_opening_sankey,
+)
 
 require_auth()
 
 _service = WelcomeService()
+_oa_service = OpeningAnalysisService()
 
 _TIMEFRAMES = {
     "Last 30 days":  30,
@@ -265,6 +272,165 @@ else:
 
 st.divider()
 
+# ── Opening Continuations (Sankey) ───────────────────────────────────────────
+
+st.subheader("Opening Continuations")
+st.caption("Click a node to see stats for that opening path.")
+
+_edges_df, _node_stats_df = _service.get_opening_flow(
+    lookback_days=lookback,
+    players=active_players,
+    min_games=2,
+)
+
+# Trim to top 5 root openings (nodes that are sources but never targets)
+if not _edges_df.empty:
+    _all_targets = set(_edges_df["target"])
+    _root_nodes = [s for s in _edges_df["source"].unique() if s not in _all_targets]
+    _root_games = (
+        _node_stats_df[_node_stats_df["node"].isin(_root_nodes)]
+        .nlargest(5, "games")["node"]
+        .tolist()
+    )
+    _reachable: set[str] = set(_root_games)
+    for _depth in range(3):
+        _reachable |= set(
+            _edges_df[_edges_df["source"].isin(_reachable)]["target"]
+        )
+    _edges_df = _edges_df[
+        _edges_df["source"].isin(_reachable) & _edges_df["target"].isin(_reachable)
+    ].reset_index(drop=True)
+
+if _edges_df.empty:
+    st.info("No opening data available for this period.")
+else:
+    _total_games = int(
+        _node_stats_df[
+            _node_stats_df["node"].isin(set(_edges_df["source"]) | set(_edges_df["target"]))
+        ]["games"].max()
+    ) if not _node_stats_df.empty else 0
+
+    _sankey_title = f"Opening Continuations — {selected_label}  ·  {_total_games} games"
+
+    _selected_node: str | None = st.session_state.get("_opening_selected_node")
+
+    _sankey_fig = welcome_opening_sankey(
+        _edges_df,
+        _node_stats_df,
+        selected_node=_selected_node,
+        title=_sankey_title,
+    )
+    # Build the ordered node label list to resolve point_number → label
+    _sankey_labels: list[str] = list(dict.fromkeys(
+        _edges_df["source"].tolist() + _edges_df["target"].tolist()
+    ))
+
+    _sankey_event = st.plotly_chart(
+        _sankey_fig,
+        use_container_width=True,
+        on_select="rerun",
+        key="opening_sankey",
+    )
+
+    # Handle click events — Sankey node clicks come in as point_number (node index)
+    _clicked_label: str | None = None
+    if _sankey_event and _sankey_event.selection:
+        pts = _sankey_event.selection.get("points", [])
+        if pts:
+            pt = pts[0]
+            # Try label/customdata first, fall back to point_number index
+            _clicked_label = (
+                pt.get("label")
+                or (pt.get("customdata")[0] if isinstance(pt.get("customdata"), list) and pt.get("customdata") else None)
+                or pt.get("customdata")
+            )
+            if _clicked_label is None:
+                idx = pt.get("point_number")
+                if idx is not None and 0 <= idx < len(_sankey_labels):
+                    _clicked_label = _sankey_labels[idx]
+
+    if _clicked_label and _clicked_label != _selected_node:
+        st.session_state["_opening_selected_node"] = _clicked_label
+        st.rerun()
+    elif _clicked_label and _clicked_label == _selected_node:
+        # Second click on same node deselects it
+        st.session_state.pop("_opening_selected_node", None)
+        st.rerun()
+
+    # ── Stats panel for selected node ─────────────────────────────────────
+    if _selected_node and not _node_stats_df.empty:
+        _ns_row = _node_stats_df[_node_stats_df["node"] == _selected_node]
+        if not _ns_row.empty:
+            _ns = _ns_row.iloc[0]
+            st.markdown(f"**{_selected_node}** — {int(_ns['games'])} games")
+
+            _c1, _c2, _c3, _c4 = st.columns(4)
+            _c1.metric("Wins", f"{int(_ns['wins'])}  ({_ns['win_pct']:.0f}%)")
+            _c2.metric("Draws", f"{int(_ns['draws'])}  ({_ns['draw_pct']:.0f}%)")
+            _c3.metric("Losses", f"{int(_ns['losses'])}  ({_ns['loss_pct']:.0f}%)")
+            _wa = _ns.get("avg_white_accuracy")
+            _ba = _ns.get("avg_black_accuracy")
+            if _wa is not None and _ba is not None:
+                _c4.metric("Avg Accuracy", f"W {_wa:.0f}% / B {_ba:.0f}%")
+            elif _wa is not None:
+                _c4.metric("White Accuracy", f"{_wa:.0f}%")
+            elif _ba is not None:
+                _c4.metric("Black Accuracy", f"{_ba:.0f}%")
+
+            # Player breakdown table
+            _player_counts: dict = _ns.get("players") or {}
+            if _player_counts:
+                _player_rows = sorted(_player_counts.items(), key=lambda x: -x[1])
+                _player_html_rows = "".join(
+                    f'<tr><td class="wc-player">{escape(p)}</td>'
+                    f'<td class="wc-acc">{n}</td></tr>'
+                    for p, n in _player_rows
+                )
+                st.html(
+                    _TABLE_STYLE
+                    + f"""<table class="wc-table" style="max-width:320px">
+                      <thead><tr><th>Player</th><th>Games</th></tr></thead>
+                      <tbody>{_player_html_rows}</tbody>
+                    </table>"""
+                )
+            if st.button("Clear selection", key="clear_opening"):
+                st.session_state.pop("_opening_selected_node", None)
+                st.rerun()
+
+# ── Most Common Openings (Wins vs Losses) ────────────────────────────────────
+
+if not _edges_df.empty:
+    _all_club_games = _oa_service.club_recent_games()
+
+    # Apply the same time filter as the rest of the page
+    _oa_cutoff = datetime.utcnow() - timedelta(days=lookback)
+    _oa_played = pd.to_datetime(_all_club_games["played_at"], errors="coerce")
+    if _oa_played.dt.tz is not None:
+        _oa_played = _oa_played.dt.tz_localize(None)
+    _all_club_games = _all_club_games[_oa_played >= _oa_cutoff].copy()
+
+    # Apply the same player filter
+    _all_club_games = _all_club_games[
+        _all_club_games["player"].isin([p.lower() for p in active_players])
+    ]
+
+    _opening_metrics_df = _oa_service.opening_metrics_table(_all_club_games)
+
+    if not _opening_metrics_df.empty:
+        # Build a context label for the chart title
+        _player_label = (
+            ", ".join(sorted(active_players))
+            if active_players != all_members
+            else "All Members"
+        )
+        _oa_title = f"Most Common Openings — {selected_label} · {_player_label}"
+
+        _oa_fig = opening_wins_losses_bar(_opening_metrics_df)
+        _oa_fig.update_layout(title_text=_oa_title)
+        st.plotly_chart(_oa_fig, use_container_width=True, config={"displaylogo": False})
+
+st.divider()
+
 # ── Best Recent Games (by Accuracy) ──────────────────────────────────────────
 
 st.subheader("Best Played Games — Recent")
@@ -280,15 +446,17 @@ else:
 st.divider()
 
 # ── Best Club Games Ever (by ACPL) ───────────────────────────────────────────
+# NOTE: this section is intentionally NOT filtered by timeframe or player —
+# it always shows the all-time best 10 games in the database.
 
-st.subheader("Best Club Games Ever")
+st.subheader("🏆 Best Club Games — All Time")
 st.caption(
-    "All-time top 10 games by lowest combined Average Centipawn Loss (ACPL). "
-    "Games played in the last 7 days are highlighted."
+    "The 10 best games ever played by the club, ranked by lowest combined ACPL (all time, "
+    "unaffected by the timeframe or player filters above). "
+    "Games played in the last 7 days are marked New."
 )
 
 ever_df = _service.get_best_all_time_games_by_acpl(limit=10)
-ever_df = _filter_games_by_player(ever_df)
 if ever_df.empty:
     st.info("No analysed games found.")
 else:

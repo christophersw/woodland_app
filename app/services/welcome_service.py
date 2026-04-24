@@ -4,15 +4,22 @@ Provides:
   - ELO timeseries for all club players
   - Top-N recent games by combined accuracy
   - Top-N all-time games by lowest combined ACPL
+  - Opening flow data for Sankey chart (3-move continuations)
 """
 
 from __future__ import annotations
 
+import io
+import re
+from collections import defaultdict
 from datetime import datetime, timedelta
 
+import chess
+import chess.pgn
 import pandas as pd
 from sqlalchemy import and_, func, select
 
+from app.services.opening_book import lookup_opening
 from app.storage.database import get_session, init_db
 from app.storage.models import (
     Game,
@@ -22,6 +29,8 @@ from app.storage.models import (
     MoveAnalysis,
     Player,
 )
+
+_SAN_CLEAN = re.compile(r"[+#!?]")
 
 # Games with fewer than this many plies are excluded from all welcome queries.
 _MIN_PLIES = 20  # 10 full moves (white + black)
@@ -288,3 +297,204 @@ class WelcomeService:
                 for row in rows
             ]
         )
+
+    # ── Opening flow (Sankey) ────────────────────────────────────────────────
+
+    def get_opening_flow(
+        self,
+        lookback_days: int = 90,
+        players: list[str] | None = None,
+        min_games: int = 2,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Return data for a 3-level opening continuation Sankey chart.
+
+        Builds 3 Sankey levels by looking up opening book names at plies 2, 4,
+        and 6 (after white's 1st, 2nd, and 3rd moves):
+          Level 1: opening name after move 1 pair  (e.g. "King's Pawn Game")
+          Level 2: opening name after move 2 pair  (e.g. "King's Knight Opening")
+          Level 3: opening name after move 3 pair  (e.g. "Italian Game")
+
+        Returns (edges_df, node_stats_df):
+
+        edges_df columns: source, target, games
+        node_stats_df columns: node, games, wins, draws, losses,
+            win_pct, draw_pct, loss_pct,
+            avg_white_accuracy, avg_black_accuracy,
+            players (dict: username → game_count)
+        """
+        floor_date = datetime.utcnow() - timedelta(days=lookback_days)
+
+        with get_session() as session:
+            stmt = (
+                select(
+                    Game.id.label("game_id"),
+                    Game.pgn,
+                    Game.white_username,
+                    Game.black_username,
+                    GameParticipant.color,
+                    GameParticipant.result,
+                    Player.username.label("club_player"),
+                    GameAnalysis.white_accuracy,
+                    GameAnalysis.black_accuracy,
+                )
+                .join(GameParticipant, GameParticipant.game_id == Game.id)
+                .join(Player, Player.id == GameParticipant.player_id)
+                .outerjoin(GameAnalysis, GameAnalysis.game_id == Game.id)
+                .where(
+                    and_(
+                        Game.played_at >= floor_date,
+                        Game.pgn.is_not(None),
+                        Game.pgn != "",
+                    )
+                )
+                .order_by(Game.played_at.desc())
+            )
+            if players:
+                stmt = stmt.where(
+                    func.lower(Player.username).in_([p.lower() for p in players])
+                )
+            rows = session.execute(stmt).all()
+
+        if not rows:
+            return pd.DataFrame(), pd.DataFrame()
+
+        # One record per (game_id, club_player) — games with two club players
+        # appear twice so each player's W/L/D perspective is counted.
+        seen: set[tuple[int, str]] = set()
+        records = []
+        for row in rows:
+            key = (row.game_id, row.club_player)
+            if key in seen:
+                continue
+            seen.add(key)
+            records.append(row)
+
+        edge_counts: dict[tuple[str, str], int] = defaultdict(int)
+        node_data: dict[str, dict] = {}
+
+        for row in records:
+            path = self._opening_name_path(row.pgn)
+            if not path:
+                continue
+
+            result = row.result
+            w_acc = row.white_accuracy
+            b_acc = row.black_accuracy
+            player = row.club_player
+
+            for i in range(len(path) - 1):
+                edge_counts[(path[i], path[i + 1])] += 1
+
+            for node_label in path:
+                if node_label not in node_data:
+                    node_data[node_label] = {
+                        "games": 0, "wins": 0, "draws": 0, "losses": 0,
+                        "white_acc_sum": 0.0, "white_acc_n": 0,
+                        "black_acc_sum": 0.0, "black_acc_n": 0,
+                        "players": defaultdict(int),
+                    }
+                nd = node_data[node_label]
+                nd["games"] += 1
+                if result == "Win":
+                    nd["wins"] += 1
+                elif result == "Draw":
+                    nd["draws"] += 1
+                else:
+                    nd["losses"] += 1
+                if w_acc is not None:
+                    nd["white_acc_sum"] += w_acc
+                    nd["white_acc_n"] += 1
+                if b_acc is not None:
+                    nd["black_acc_sum"] += b_acc
+                    nd["black_acc_n"] += 1
+                nd["players"][player] += 1
+
+        if not edge_counts:
+            return pd.DataFrame(), pd.DataFrame()
+
+        edges_df = pd.DataFrame(
+            [{"source": s, "target": t, "games": c} for (s, t), c in edge_counts.items()]
+        )
+        edges_df = edges_df[edges_df["games"] >= min_games].reset_index(drop=True)
+
+        node_rows = []
+        for label, nd in node_data.items():
+            g = nd["games"]
+            node_rows.append({
+                "node": label,
+                "games": g,
+                "wins": nd["wins"],
+                "draws": nd["draws"],
+                "losses": nd["losses"],
+                "win_pct": round(nd["wins"] / g * 100, 1) if g else 0.0,
+                "draw_pct": round(nd["draws"] / g * 100, 1) if g else 0.0,
+                "loss_pct": round(nd["losses"] / g * 100, 1) if g else 0.0,
+                "avg_white_accuracy": (
+                    round(nd["white_acc_sum"] / nd["white_acc_n"], 1)
+                    if nd["white_acc_n"] else None
+                ),
+                "avg_black_accuracy": (
+                    round(nd["black_acc_sum"] / nd["black_acc_n"], 1)
+                    if nd["black_acc_n"] else None
+                ),
+                "players": dict(nd["players"]),
+            })
+        node_stats_df = pd.DataFrame(node_rows)
+
+        return edges_df, node_stats_df
+
+    @staticmethod
+    def _opening_name_path(pgn_text: str) -> list[str]:
+        """Return a 3-node opening name path by querying the opening book
+        at plies 2, 4, and 6 (after each of the first 3 full move pairs).
+
+        Returns [] if the game has fewer than 2 half-moves.
+        Consecutive identical names are deduplicated to avoid self-loops.
+        """
+        try:
+            game = chess.pgn.read_game(io.StringIO(pgn_text))
+        except Exception:
+            return []
+        if game is None:
+            return []
+
+        board = game.board()
+        path_names: list[str] = []
+        node = game
+        ply = 0
+
+        while ply < 6:
+            if not node.variations:
+                break
+            node = node.variations[0]
+            board.push(node.move)
+            ply += 1
+
+            # Sample at plies 2, 4, 6 (after each full move pair)
+            if ply % 2 == 0:
+                result = lookup_opening(board)
+                if result:
+                    _, name = result
+                    # Strip the opening family prefix (everything before ":")
+                    # to get a compact variation label for deeper levels.
+                    if ply > 2 and ":" in name:
+                        name = name.split(":", 1)[1].strip()
+                    # Trim for Sankey readability
+                    if len(name) > 36:
+                        name = name[:35] + "…"
+                    path_names.append(name)
+                else:
+                    # No match at this ply — carry forward last known name
+                    if path_names:
+                        path_names.append(path_names[-1])
+
+        if not path_names:
+            return []
+
+        # Deduplicate consecutive identical names (avoids self-loops in Sankey)
+        deduped: list[str] = [path_names[0]]
+        for name in path_names[1:]:
+            if name != deduped[-1]:
+                deduped.append(name)
+
+        return deduped

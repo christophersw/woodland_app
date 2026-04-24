@@ -368,9 +368,16 @@ _GENTLEMAN_CSS = """
   [data-testid="stSidebar"] * {
     color: var(--c-parchment) !important;
   }
-  [data-testid="stSidebar"] [data-testid="stSidebarNavItems"] a {
-    font-family: 'EB Garamond', Georgia, serif !important;
-    font-size: 1.0625rem;
+  [data-testid="stSidebar"] [data-testid="stSidebarNavItems"] a,
+  [data-testid="stSidebar"] [data-testid="stSidebarNavItems"] a p,
+  [data-testid="stSidebar"] [data-testid="stSidebarNav"] a,
+  [data-testid="stSidebar"] [data-testid="stSidebarNav"] a p,
+  [data-testid="stSidebar"] [data-testid="stSidebarNav"] [role="button"] p {
+    font-family: 'Cormorant Garamond', 'EB Garamond', Georgia, serif !important;
+    font-size: 1.25rem !important;
+    font-weight: 700 !important;
+    line-height: 1.25 !important;
+    letter-spacing: 0.015em !important;
     color: var(--c-parchment) !important;
   }
   [data-testid="stSidebar"] [data-testid="stSidebarNavItems"] a:hover,
@@ -506,21 +513,21 @@ def main() -> None:
         if authenticated:
             _logout = st.Page(logout_page, title="Sign Out", icon="🚪", url_path="logout")
             pages: dict | list = {
-                "": [welcome_page, opening_analysis_page, analysis_page, search_page],
-                "Admin": [status_page, members_page],
+                "": [welcome_page, opening_analysis_page, search_page],
+                "Admin": [status_page, members_page, analysis_page],
                 "Account": [_logout],
             }
         else:
             _login = st.Page(login_page, title="Sign In", icon="🔑", url_path="login")
             pages = {
-                "": [welcome_page, opening_analysis_page, analysis_page, search_page],
-                "Admin": [status_page, members_page],
+                "": [welcome_page, opening_analysis_page, search_page],
+                "Admin": [status_page, members_page, analysis_page],
                 "Account": [_login],
             }
     else:
         pages = {
-            "": [welcome_page, opening_analysis_page, analysis_page, search_page],
-            "Admin": [status_page, members_page],
+            "": [welcome_page, opening_analysis_page, search_page],
+            "Admin": [status_page, members_page, analysis_page],
         }
 
     nav = st.navigation(pages, position="sidebar")

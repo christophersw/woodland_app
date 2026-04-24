@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 import requests
-from sqlalchemy import or_, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.history_service import HistoryFilters, HistoryService
@@ -256,6 +256,43 @@ Use broad matches — e.g. '%sicilian%' for any Sicilian, '%caro%kann%' for Caro
 """.strip()
 
 
+def _player_directory_context() -> str:
+    """Return a compact prompt fragment with known club player identities.
+
+    The SQL planner can only query the allowed game tables, so we provide a
+    username/display-name directory here and instruct it to map human names
+    back to usernames when generating SQL.
+    """
+    init_db()
+    with get_session() as session:
+        rows = session.execute(
+            select(Player.username, Player.display_name).order_by(Player.username)
+        ).all()
+
+    if not rows:
+        return "Known club players: none loaded."
+
+    lines = [
+        "KNOWN CLUB PLAYERS:",
+        "- Map mentions of first names, display names, and possessive forms to these usernames.",
+        "- Generate filters against games.white_username, games.black_username, or games.winner_username.",
+        "- If one player clearly matches, prefer that exact username in the SQL.",
+        "- If a name could refer to multiple known usernames, include OR conditions for each likely username.",
+    ]
+
+    for row in rows[:100]:
+        username = (row.username or "").strip()
+        display_name = (row.display_name or "").strip()
+        if not username:
+            continue
+        if display_name and display_name.lower() != username.lower():
+            lines.append(f"- username: {username}; display_name: {display_name}")
+        else:
+            lines.append(f"- username: {username}")
+
+    return "\n".join(lines)
+
+
 def is_anthropic_available() -> bool:
     return bool(get_settings().anthropic_api_key.strip())
 
@@ -376,6 +413,11 @@ def generate_search_plan(user_query: str) -> SearchPlan:
             {
                 "type": "text",
                 "text": _schema_context(),
+                "cache_control": {"type": "ephemeral"},
+            },
+            {
+                "type": "text",
+                "text": _player_directory_context(),
                 "cache_control": {"type": "ephemeral"},
             },
         ],

@@ -498,6 +498,139 @@ def opening_flow_sankey(flow_df: pd.DataFrame):
     return fig
 
 
+def welcome_opening_sankey(
+    edges_df: pd.DataFrame,
+    node_stats_df: pd.DataFrame,
+    selected_node: str | None = None,
+    title: str = "Opening Continuations",
+) -> go.Figure:
+    """3-level opening continuation Sankey for the welcome page.
+
+    edges_df: source, target, games
+    node_stats_df: node, games, wins, draws, losses, win_pct, draw_pct, loss_pct,
+                   avg_white_accuracy, avg_black_accuracy, players
+    selected_node: if set, that node is highlighted and others dimmed.
+    player_colors: mapping of player username → hex color. Each node is tinted
+                   by its dominant player; links inherit the source node color.
+    title: chart title string (include timeframe + game count from caller).
+    """
+    if edges_df.empty:
+        return go.Figure()
+
+    labels: list[str] = list(dict.fromkeys(
+        edges_df["source"].tolist() + edges_df["target"].tolist()
+    ))
+    idx_map = {label: i for i, label in enumerate(labels)}
+
+    stats_lookup: dict[str, dict] = {}
+    if not node_stats_df.empty:
+        for _, row in node_stats_df.iterrows():
+            stats_lookup[row["node"]] = row.to_dict()
+
+    def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+        h = hex_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{alpha})"
+
+    def _hover(label: str) -> str:
+        s = stats_lookup.get(label, {})
+        if not s:
+            return label
+        g = s.get("games", 0)
+        wp = s.get("win_pct", 0)
+        dp = s.get("draw_pct", 0)
+        lp = s.get("loss_pct", 0)
+        wa = s.get("avg_white_accuracy")
+        ba = s.get("avg_black_accuracy")
+        players: dict = s.get("players") or {}
+        acc_line = ""
+        if wa is not None or ba is not None:
+            parts = []
+            if wa is not None:
+                parts.append(f"W {wa:.0f}%")
+            if ba is not None:
+                parts.append(f"B {ba:.0f}%")
+            acc_line = f"<br>Accuracy: {' · '.join(parts)}"
+        player_lines = "".join(
+            f"<br>{p}: {n}"
+            for p, n in sorted(players.items(), key=lambda x: -x[1])
+        )
+        return (
+            f"<b>{label}</b><br>"
+            f"{g} games<br>"
+            f"W {wp:.0f}% · D {dp:.0f}% · L {lp:.0f}%"
+            f"{acc_line}"
+            f"{player_lines}"
+            "<extra></extra>"
+        )
+
+    # Selection state — selected node highlighted whisky, others dimmed
+    selected_set: set[str] = set()
+    neighbour_set: set[str] = set()
+    if selected_node:
+        selected_set.add(selected_node)
+        for _, row in edges_df.iterrows():
+            if row["source"] == selected_node:
+                neighbour_set.add(row["target"])
+            if row["target"] == selected_node:
+                neighbour_set.add(row["source"])
+
+    def _node_color(label: str) -> str:
+        if label in selected_set:
+            return _GP["whisky"]
+        if selected_node and label not in neighbour_set:
+            return _hex_to_rgba(_GP["crimson"], 0.25)
+        return _GP["crimson"]
+
+    node_colors = [_node_color(lbl) for lbl in labels]
+
+    def _link_color(src: str, tgt: str) -> str:
+        if selected_node:
+            if src in selected_set or tgt in selected_set:
+                return _hex_to_rgba(_GP["whisky"], 0.55)
+            return _hex_to_rgba(_GP["whisky"], 0.08)
+        return _hex_to_rgba(_GP["whisky"], 0.35)
+
+    link_colors = [
+        _link_color(r["source"], r["target"])
+        for _, r in edges_df.iterrows()
+    ]
+
+    fig = go.Figure(
+        data=[
+            go.Sankey(
+                arrangement="snap",
+                textfont=dict(family=_GP_MONO, size=12, color=_GP["ebony"]),
+                node=dict(
+                    label=labels,
+                    customdata=labels,
+                    hovertemplate=[_hover(lbl) for lbl in labels],
+                    pad=24,
+                    thickness=22,
+                    color=node_colors,
+                    line=dict(color=_GP["ebony"], width=1.5),
+                ),
+                link=dict(
+                    source=[idx_map[r["source"]] for _, r in edges_df.iterrows()],
+                    target=[idx_map[r["target"]] for _, r in edges_df.iterrows()],
+                    value=edges_df["games"].tolist(),
+                    color=link_colors,
+                    hovertemplate=(
+                        "<b>%{source.label}</b> → <b>%{target.label}</b><br>"
+                        "%{value} games<extra></extra>"
+                    ),
+                ),
+            )
+        ]
+    )
+    fig.update_layout(**_gp_layout(
+        title=title,
+        margin=dict(l=10, r=10, t=64, b=20),
+        height=540,
+    ))
+    return fig
+
+
 def opening_wins_losses_bar(metrics_df: pd.DataFrame, top_n: int = 15) -> go.Figure:
     if metrics_df.empty:
         return go.Figure()

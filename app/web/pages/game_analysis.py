@@ -18,58 +18,416 @@ _settings = get_settings()
 
 service = AnalysisService()
 
+# ── Du Bois engine analysis CSS ───────────────────────────────────────────────
+_ENGINE_CSS = """<style>
+.dub {
+  font-family: 'DM Mono', 'Courier New', monospace;
+  color: #1A1A1A;
+  margin-bottom: 1.6rem;
+}
+.dub-head {
+  border-top: 3px solid #1A1A1A;
+  border-bottom: 1.5px solid #1A1A1A;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 5px 0 4px;
+  margin-bottom: 16px;
+}
+.dub-title {
+  font-family: 'Playfair Display SC', 'Cormorant Garamond', Georgia, serif;
+  font-size: 0.92rem;
+  letter-spacing: 0.07em;
+  color: #1A3A2A;
+}
+.dub-meta {
+  font-size: 0.60rem;
+  letter-spacing: 0.06em;
+  color: #8B3A2A;
+  text-transform: uppercase;
+}
+/* Standard comparison row: [player label] [bar] [value] */
+.dub-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 52px;
+  align-items: center;
+  gap: 0 8px;
+  margin-bottom: 5px;
+}
+.dub-player-lbl {
+  font-size: 0.70rem;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #1A1A1A;
+}
+.dub-chess { color: #8B3A2A; margin-right: 3px; }
+.dub-val {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+  color: #1A1A1A;
+}
+/* Horizontal bar */
+.dub-bar {
+  height: 22px;
+  background: #F2E6D0;
+  border: 1.5px solid #1A1A1A;
+  position: relative;
+  overflow: hidden;
+}
+.dub-bar-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+}
+/* Stacked bar (WDL, move quality) */
+.dub-stack {
+  height: 26px;
+  display: flex;
+  border: 1.5px solid #1A1A1A;
+  overflow: hidden;
+}
+.dub-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.60rem;
+  font-weight: 700;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #F2E6D0;
+}
+/* WDL colours */
+.dub-win  { background: #1A3A2A; }
+.dub-draw { background: #8B3A2A; }
+.dub-loss { background: #B53541; }
+/* Move quality colours */
+.dub-bril { background: #2C6B4A; }
+.dub-best { background: #4A6E8A; }
+.dub-great { background: #4A6554; }
+.dub-neut { background: #EFE4CC; color: #5A5A5A; }
+.dub-inac { background: #E07B7B; color: #1A1A1A; }
+.dub-mist { background: #CE3A4A; }
+.dub-blun { background: #B53541; }
+/* Section sub-label */
+.dub-lbl {
+  font-size: 0.54rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #5A5A5A;
+  margin: 10px 0 4px;
+}
+.dub-rule {
+  border: none;
+  border-top: 1px solid #D4C4A0;
+  margin: 12px 0 10px;
+}
+/* Count summary: bold number + small label */
+.dub-counts-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 0 8px;
+  margin-bottom: 4px;
+}
+.dub-counts {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.dub-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+.dub-n { font-size: 1.10rem; font-weight: 700; line-height: 1; }
+.dub-k { font-size: 0.56rem; letter-spacing: 0.06em; text-transform: uppercase; color: #5A5A5A; }
+.c-bril { color: #2C6B4A; }
+.c-best { color: #4A6E8A; }
+.c-great { color: #4A6554; }
+.c-inac { color: #E07B7B; }
+.c-mist { color: #CE3A4A; }
+.c-blun { color: #B53541; }
+/* Legend row */
+.dub-legend {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.57rem;
+  color: #5A5A5A;
+  letter-spacing: 0.04em;
+  margin-top: 5px;
+}
+.dub-swatch {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border: 1px solid #1A1A1A;
+  vertical-align: middle;
+  margin-right: 2px;
+}
+</style>"""
 
-def _render_stat_card(
-    label: str,
-    value: str | int | float,
-    kind: str,
-    compact: bool = False,
-    extra_class: str = "",
-) -> None:
-    safe_label = escape(str(label))
-    safe_value = escape(str(value))
-    safe_kind = escape(str(kind))
-    compact_class = " analysis-stat--compact" if compact else ""
-    safe_extra_class = escape(extra_class.strip())
-    extra_class_attr = f" {safe_extra_class}" if safe_extra_class else ""
-    st.markdown(
-        f"""
-                <div class="analysis-stat{compact_class}{extra_class_attr}">
-                    <div class="analysis-stat__label">{safe_label}</div>
-                    <div class="analysis-stat-card analysis-stat-card--{safe_kind}">
-                        <div class="analysis-stat-card__value">{safe_value}</div>
-                    </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+
+# ── Du Bois render helpers ─────────────────────────────────────────────────────
+
+def _acc_color(pct: float) -> str:
+    if pct >= 90: return "#1A3A2A"
+    if pct >= 80: return "#4A6554"
+    if pct >= 70: return "#D4A843"
+    return "#B53541"
+
+
+def _bar_row(sym: str, name: str, pct: float, val_str: str, fill: str | None = None) -> str:
+    color = fill or _acc_color(pct)
+    w = min(max(pct, 0), 100)
+    return (
+        f'<div class="dub-row">'
+        f'<div class="dub-player-lbl"><span class="dub-chess">{sym}</span>{escape(name)}</div>'
+        f'<div class="dub-bar"><div class="dub-bar-fill" style="width:{w:.1f}%;background:{color}"></div></div>'
+        f'<div class="dub-val">{escape(val_str)}</div>'
+        f'</div>'
     )
 
 
-def _render_top_stat_row(cards: list[tuple[str, str | int | float, str]]):
-    widths = [max(2.6, len(label) * 0.3 + 1.7) for label, _, _ in cards]
-    name_col, *stat_cols = st.columns([3.2, *widths])
-    for col, (label, value, kind) in zip(stat_cols, cards):
-        with col:
-            _render_stat_card(
-                label,
-                value,
-                kind,
-                compact=True,
-                extra_class="analysis-stat--top-row-compact",
+def _wdl_row(sym: str, name: str, win: float, draw: float, loss: float) -> str:
+    def _seg(cls: str, pct: float, lbl: str) -> str:
+        txt = lbl if pct >= 9 else ""
+        return f'<div class="dub-seg {cls}" style="flex:{pct:.1f}">{escape(txt)}</div>'
+    segs = (
+        _seg("dub-win",  win,  f"W {win:.0f}%")
+        + _seg("dub-draw", draw, f"D {draw:.0f}%")
+        + _seg("dub-loss", loss, f"L {loss:.0f}%")
+    )
+    return (
+        f'<div class="dub-row">'
+        f'<div class="dub-player-lbl"><span class="dub-chess">{sym}</span>{escape(name)}</div>'
+        f'<div class="dub-stack">{segs}</div>'
+        f'<div class="dub-val" style="font-size:0.58rem;color:#5A5A5A">WDL</div>'
+        f'</div>'
+    )
+
+
+def _quality_row(
+    sym: str, name: str,
+    brilliant: int, best: int, great: int,
+    inaccuracy: int, mistake: int, blunder: int,
+    total: int,
+) -> str:
+    classified = brilliant + best + great + inaccuracy + mistake + blunder
+    neutral = max(0, total - classified)
+
+    def _seg(cls: str, n: int, lbl: str) -> str:
+        if n == 0 or total == 0:
+            return ""
+        pct = n / total * 100
+        txt = lbl if pct >= 6 else ""
+        return f'<div class="dub-seg {cls}" style="flex:{pct:.2f}">{escape(txt)}</div>'
+
+    neu_seg = ""
+    if neutral > 0 and total > 0:
+        pct = neutral / total * 100
+        neu_seg = f'<div class="dub-seg dub-neut" style="flex:{pct:.2f}"></div>'
+
+    segs = (
+        _seg("dub-bril", brilliant, "!!")
+        + _seg("dub-best", best, "B")
+        + _seg("dub-great", great, "Gr")
+        + neu_seg
+        + _seg("dub-inac", inaccuracy, "?!")
+        + _seg("dub-mist", mistake, "?")
+        + _seg("dub-blun", blunder, "??")
+    )
+    total_label = str(total) if total else ""
+    return (
+        f'<div class="dub-row">'
+        f'<div class="dub-player-lbl"><span class="dub-chess">{sym}</span>{escape(name)}</div>'
+        f'<div class="dub-stack">{segs}</div>'
+        f'<div class="dub-val" style="font-size:0.60rem;color:#5A5A5A">{total_label}</div>'
+        f'</div>'
+    )
+
+
+def _count(n: int | None, label: str, cls: str) -> str:
+    if n is None:
+        return ""
+    return (
+        f'<span class="dub-count">'
+        f'<span class="dub-n {cls}">{n}</span>'
+        f'<span class="dub-k">{escape(label)}</span>'
+        f'</span>'
+    )
+
+
+def _counts_row(sym: str, name: str, items: list[tuple[int | None, str, str]]) -> str:
+    spans = "".join(_count(n, lbl, cls) for n, lbl, cls in items)
+    return (
+        f'<div class="dub-counts-row">'
+        f'<div class="dub-player-lbl"><span class="dub-chess">{sym}</span>{escape(name)}</div>'
+        f'<div class="dub-counts">{spans}</div>'
+        f'</div>'
+    )
+
+
+_QUALITY_LEGEND = (
+    '<div class="dub-legend">'
+    '<span><span class="dub-swatch" style="background:#2C6B4A"></span>Brilliant</span>'
+    '<span><span class="dub-swatch" style="background:#4A6E8A"></span>Best</span>'
+    '<span><span class="dub-swatch" style="background:#4A6554"></span>Great</span>'
+    '<span><span class="dub-swatch" style="background:#EFE4CC"></span>Good</span>'
+    '<span><span class="dub-swatch" style="background:#E07B7B"></span>Inaccuracy</span>'
+    '<span><span class="dub-swatch" style="background:#CE3A4A"></span>Mistake</span>'
+    '<span><span class="dub-swatch" style="background:#B53541"></span>Blunder</span>'
+    '</div>'
+)
+
+
+def _render_stockfish_html(
+    white: str, black: str,
+    w_acc: float, b_acc: float,
+    w_acpl: float | None, b_acpl: float | None,
+    w_bril: int | None, b_bril: int | None,
+    w_best: int | None, b_best: int | None,
+    w_great: int | None, b_great: int | None,
+    w_inac: int | None, b_inac: int | None,
+    w_mist: int | None, b_mist: int | None,
+    w_blun: int | None, b_blun: int | None,
+    w_total: int, b_total: int,
+    depth: int | None,
+    derived: bool,
+) -> str:
+    meta_parts = []
+    if depth:
+        meta_parts.append(f"Depth {depth}")
+    if derived:
+        meta_parts.append("Accuracy derived from CPL")
+    meta = " · ".join(meta_parts)
+
+    # Accuracy bars (same 0–100 scale, colour encodes quality)
+    acc_section = (
+        f'<div class="dub-lbl">Accuracy</div>'
+        + _bar_row("♙", white, w_acc, f"{w_acc:.1f}%")
+        + _bar_row("♟", black, b_acc, f"{b_acc:.1f}%")
+    )
+
+    # CPL bars (0–100 scale: 100 CPL = full bar; higher = redder)
+    acpl_section = ""
+    if w_acpl is not None or b_acpl is not None:
+        w_str = f"{w_acpl:.1f}" if w_acpl is not None else "—"
+        b_str = f"{b_acpl:.1f}" if b_acpl is not None else "—"
+        w_pct = min(100.0, (w_acpl or 0))
+        b_pct = min(100.0, (b_acpl or 0))
+        acpl_section = (
+            f'<div class="dub-lbl">Avg Centipawn Loss</div>'
+            + _bar_row("♙", white, w_pct, w_str, fill="#B53541")
+            + _bar_row("♟", black, b_pct, b_str, fill="#B53541")
+        )
+
+    # Move quality stacked bars + count summary
+    quality_section = ""
+    if w_total > 0 or b_total > 0:
+        rows = ""
+        if w_total > 0:
+            rows += _quality_row(
+                "♙", white,
+                w_bril or 0, w_best or 0, w_great or 0,
+                w_inac or 0, w_mist or 0, w_blun or 0,
+                w_total,
             )
-    return name_col
+        if b_total > 0:
+            rows += _quality_row(
+                "♟", black,
+                b_bril or 0, b_best or 0, b_great or 0,
+                b_inac or 0, b_mist or 0, b_blun or 0,
+                b_total,
+            )
+        w_summary = _counts_row("♙", white, [
+            (w_bril, "Brilliant", "c-bril"),
+            (w_best, "Best", "c-best"),
+            (w_great, "Great", "c-great"),
+            (w_inac, "Inaccuracy", "c-inac"),
+            (w_mist, "Mistake", "c-mist"),
+            (w_blun, "Blunder", "c-blun"),
+        ])
+        b_summary = _counts_row("♟", black, [
+            (b_bril, "Brilliant", "c-bril"),
+            (b_best, "Best", "c-best"),
+            (b_great, "Great", "c-great"),
+            (b_inac, "Inaccuracy", "c-inac"),
+            (b_mist, "Mistake", "c-mist"),
+            (b_blun, "Blunder", "c-blun"),
+        ])
+        quality_section = (
+            f'<hr class="dub-rule">'
+            f'<div class="dub-lbl">Move Quality</div>'
+            + rows
+            + _QUALITY_LEGEND
+            + f'<div style="margin-top:8px">{w_summary}{b_summary}</div>'
+        )
+
+    return (
+        f'<div class="dub">'
+        f'<div class="dub-head">'
+        f'<span class="dub-title">Stockfish Analysis</span>'
+        f'<span class="dub-meta">{escape(meta)}</span>'
+        f'</div>'
+        + acc_section + acpl_section + quality_section
+        + '</div>'
+    )
 
 
-def _render_three_stat_grid(cards: list[tuple[str, str | int | float, str]]) -> None:
-    cols = st.columns(len(cards))
-    for col, (label, value, kind) in zip(cols, cards):
-        with col:
-            _render_stat_card(label, value, kind)
+def _render_lc0_html(
+    white: str, black: str,
+    w_win: float, w_draw: float, w_loss: float,
+    b_win: float, b_draw: float, b_loss: float,
+    w_inac: int | None, w_mist: int | None, w_blun: int | None,
+    b_inac: int | None, b_mist: int | None, b_blun: int | None,
+    network: str | None, nodes: int | None,
+) -> str:
+    meta_parts = []
+    if network:
+        meta_parts.append(network)
+    if nodes:
+        meta_parts.append(f"{nodes:,} nodes/move")
+    meta = " · ".join(meta_parts)
+
+    wdl_section = (
+        f'<div class="dub-lbl">Win / Draw / Loss Probability — average over game</div>'
+        + _wdl_row("♙", white, w_win, w_draw, w_loss)
+        + _wdl_row("♟", black, b_win, b_draw, b_loss)
+    )
+
+    errors_section = ""
+    if any(v is not None for v in [w_inac, w_mist, w_blun, b_inac, b_mist, b_blun]):
+        w_row = _counts_row("♙", white, [
+            (w_inac, "Inaccurate", "c-inac"),
+            (w_mist, "Mistake", "c-mist"),
+            (w_blun, "Blunder", "c-blun"),
+        ])
+        b_row = _counts_row("♟", black, [
+            (b_inac, "Inaccurate", "c-inac"),
+            (b_mist, "Mistake", "c-mist"),
+            (b_blun, "Blunder", "c-blun"),
+        ])
+        errors_section = (
+            f'<hr class="dub-rule">'
+            f'<div class="dub-lbl">Move Errors</div>'
+            + w_row + b_row
+        )
+
+    return (
+        f'<div class="dub">'
+        f'<div class="dub-head">'
+        f'<span class="dub-title">Lc0 Neural Network</span>'
+        f'<span class="dub-meta">{escape(meta)}</span>'
+        f'</div>'
+        + wdl_section + errors_section
+        + '</div>'
+    )
 
 
-def _render_stat_row_gap() -> None:
-    st.markdown('<div class="analysis-stat-row-gap" aria-hidden="true"></div>', unsafe_allow_html=True)
-
+# ── Stat computation helpers (unchanged) ──────────────────────────────────────
 
 def _count_classified_moves(moves_df, white_to_move: bool, classification: str) -> int | None:
     if "classification" not in moves_df.columns or moves_df.empty:
@@ -81,6 +439,13 @@ def _count_classified_moves(moves_df, white_to_move: bool, classification: str) 
     return int((side["classification"] == classification).sum())
 
 
+def _count_side_moves(moves_df, white_to_move: bool) -> int:
+    if moves_df.empty:
+        return 0
+    side_mod = 1 if white_to_move else 0
+    return len(moves_df[(moves_df["ply"] % 2) == side_mod])
+
+
 def _set_queue_flash(level: str, message: str) -> None:
     st.session_state["queue_flash"] = {"level": level, "message": message}
 
@@ -89,12 +454,10 @@ def _render_queue_flash() -> None:
     payload = st.session_state.pop("queue_flash", None)
     if not payload:
         return
-
     level = str(payload.get("level", "info"))
     message = str(payload.get("message", ""))
     if not message:
         return
-
     if level == "success":
         st.success(message)
     elif level == "warning":
@@ -106,7 +469,6 @@ def _render_queue_flash() -> None:
 
 
 def _engine_queue_status(game_id: str, engine: str) -> str | None:
-    """Return pending/running status for this game+engine if already queued."""
     with get_session() as session:
         job = session.execute(
             select(AnalysisJob)
@@ -144,23 +506,19 @@ def _harmonic_mean(values: list[float]) -> float:
 def _derive_side_stats(moves_df, white_to_move: bool) -> dict[str, float | int | None]:
     if "ply" not in moves_df.columns or "cpl" not in moves_df.columns:
         return {"accuracy": None, "acpl": None, "blunders": None, "mistakes": None, "inaccuracies": None}
-
     side_mod = 1 if white_to_move else 0
     side = moves_df[(moves_df["ply"] % 2) == side_mod].copy()
     if side.empty:
         return {"accuracy": None, "acpl": None, "blunders": None, "mistakes": None, "inaccuracies": None}
-
     cpl = side["cpl"].dropna()
     if cpl.empty:
         return {"accuracy": None, "acpl": None, "blunders": None, "mistakes": None, "inaccuracies": None}
-
     move_accs: list[float] = []
     for v in cpl.tolist():
         cp_loss = float(v)
         wp_before = 50.0
         wp_after = _win_percent(-cp_loss)
         move_accs.append(_move_accuracy(wp_before, wp_after))
-
     return {
         "accuracy": _harmonic_mean(move_accs),
         "acpl": float(cpl.mean()),
@@ -168,7 +526,6 @@ def _derive_side_stats(moves_df, white_to_move: bool) -> dict[str, float | int |
         "mistakes": int(((cpl >= 100) & (cpl < 300)).sum()),
         "inaccuracies": int(((cpl >= 50) & (cpl < 100)).sum()),
     }
-
 
 
 # ── Page header ──────────────────────────────────────────────────────────────
@@ -210,43 +567,24 @@ lc0_ready = (
 )
 
 if lc0_ready:
-    st.markdown("---")
-    st.markdown("### Lc0 Neural Network Analysis")
-    nodes_label = f"{analysis.lc0_engine_nodes:,} nodes/move" if analysis.lc0_engine_nodes else ""
-    net_label = analysis.lc0_network_name or ""
-    caption_parts = [p for p in [net_label, nodes_label] if p]
-    if caption_parts:
-        st.caption(" · ".join(caption_parts))
-
-    col_w, col_divider, col_b = st.columns([1, 0.03, 1])
-    with col_w:
-        w_name_col = _render_top_stat_row([
-            ("Avg Win %", f"{analysis.lc0_white_win_prob:.1f}%", "accuracy"),
-            ("Avg Draw %", f"{analysis.lc0_white_draw_prob:.1f}%", "accuracy"),
-            ("Avg Loss %", f"{analysis.lc0_white_loss_prob:.1f}%", "accuracy"),
-        ])
-        with w_name_col:
-            st.markdown(f"**{analysis.white}** (White)")
-        _render_three_stat_grid([
-            ("Inaccurate", analysis.lc0_white_inaccuracies or 0, "inaccuracy"),
-            ("Mistake", analysis.lc0_white_mistakes or 0, "mistake"),
-            ("Blunder", analysis.lc0_white_blunders or 0, "blunder"),
-        ])
-    with col_divider:
-        st.markdown('<div class="analysis-player-divider" aria-hidden="true"></div>', unsafe_allow_html=True)
-    with col_b:
-        b_name_col = _render_top_stat_row([
-            ("Avg Win %", f"{analysis.lc0_black_win_prob:.1f}%", "accuracy"),
-            ("Avg Draw %", f"{analysis.lc0_black_draw_prob:.1f}%", "accuracy"),
-            ("Avg Loss %", f"{analysis.lc0_black_loss_prob:.1f}%", "accuracy"),
-        ])
-        with b_name_col:
-            st.markdown(f"**{analysis.black}** (Black)")
-        _render_three_stat_grid([
-            ("Inaccurate", analysis.lc0_black_inaccuracies or 0, "inaccuracy"),
-            ("Mistake", analysis.lc0_black_mistakes or 0, "mistake"),
-            ("Blunder", analysis.lc0_black_blunders or 0, "blunder"),
-        ])
+    st.html(_ENGINE_CSS + _render_lc0_html(
+        white=analysis.white,
+        black=analysis.black,
+        w_win=analysis.lc0_white_win_prob,
+        w_draw=analysis.lc0_white_draw_prob,
+        w_loss=analysis.lc0_white_loss_prob,
+        b_win=analysis.lc0_black_win_prob,
+        b_draw=analysis.lc0_black_draw_prob,
+        b_loss=analysis.lc0_black_loss_prob,
+        w_inac=analysis.lc0_white_inaccuracies,
+        w_mist=analysis.lc0_white_mistakes,
+        w_blun=analysis.lc0_white_blunders,
+        b_inac=analysis.lc0_black_inaccuracies,
+        b_mist=analysis.lc0_black_mistakes,
+        b_blun=analysis.lc0_black_blunders,
+        network=analysis.lc0_network_name,
+        nodes=analysis.lc0_engine_nodes,
+    ))
 
 
 # ── Stockfish section ─────────────────────────────────────────────────────────
@@ -274,86 +612,32 @@ black_great_moves = _count_classified_moves(analysis.moves, white_to_move=False,
 accuracy_is_derived = analysis.white_accuracy is None and white_accuracy is not None
 
 if white_accuracy is not None and black_accuracy is not None:
-    st.markdown("---")
-    st.markdown("### Stockfish Analysis")
-    if analysis.engine_depth:
-        st.caption(f"Depth {analysis.engine_depth}")
-    if accuracy_is_derived:
-        st.caption("Accuracy derived from move CPL (stored accuracy unavailable).")
-
-    col_w, col_divider, col_b = st.columns([1, 0.03, 1])
-    with col_w:
-        if white_acpl is not None:
-            w_name_col, w_acc_col, w_acpl_col = st.columns([3.3, 1.35, 1.35])
-        else:
-            w_name_col, w_acc_col = st.columns([4.5, 1.5])
-        with w_name_col:
-            st.markdown(f"**{analysis.white}** (White)")
-        with w_acc_col:
-            _render_stat_card(
-                "Accuracy",
-                f"{white_accuracy:.1f}%",
-                "accuracy",
-                compact=True,
-                extra_class="analysis-stat--top-row-compact",
-            )
-        if white_acpl is not None:
-            with w_acpl_col:
-                _render_stat_card(
-                    "Avg CPL",
-                    f"{white_acpl:.1f}",
-                    "accuracy",
-                    compact=True,
-                    extra_class="analysis-stat--top-row-compact",
-                )
-        _render_three_stat_grid([
-            ("Best", white_best_moves if white_best_moves is not None else "-", "best"),
-            ("Brilliant", white_brilliant_moves if white_brilliant_moves is not None else "-", "brilliant"),
-            ("Great", white_great_moves if white_great_moves is not None else "-", "great"),
-        ])
-        _render_stat_row_gap()
-        _render_three_stat_grid([
-            ("Blunder", white_blunders or 0, "blunder"),
-            ("Mistake", white_mistakes or 0, "mistake"),
-            ("Inaccuracy", white_inaccuracies or 0, "inaccuracy"),
-        ])
-    with col_divider:
-        st.markdown('<div class="analysis-player-divider" aria-hidden="true"></div>', unsafe_allow_html=True)
-    with col_b:
-        if black_acpl is not None:
-            b_name_col, b_acc_col, b_acpl_col = st.columns([3.3, 1.35, 1.35])
-        else:
-            b_name_col, b_acc_col = st.columns([4.5, 1.5])
-        with b_name_col:
-            st.markdown(f"**{analysis.black}** (Black)")
-        with b_acc_col:
-            _render_stat_card(
-                "Accuracy",
-                f"{black_accuracy:.1f}%",
-                "accuracy",
-                compact=True,
-                extra_class="analysis-stat--top-row-compact",
-            )
-        if black_acpl is not None:
-            with b_acpl_col:
-                _render_stat_card(
-                    "Avg CPL",
-                    f"{black_acpl:.1f}",
-                    "accuracy",
-                    compact=True,
-                    extra_class="analysis-stat--top-row-compact",
-                )
-        _render_three_stat_grid([
-            ("Best", black_best_moves if black_best_moves is not None else "-", "best"),
-            ("Brilliant", black_brilliant_moves if black_brilliant_moves is not None else "-", "brilliant"),
-            ("Great", black_great_moves if black_great_moves is not None else "-", "great"),
-        ])
-        _render_stat_row_gap()
-        _render_three_stat_grid([
-            ("Blunder", black_blunders or 0, "blunder"),
-            ("Mistake", black_mistakes or 0, "mistake"),
-            ("Inaccuracy", black_inaccuracies or 0, "inaccuracy"),
-        ])
+    w_total = _count_side_moves(analysis.moves, white_to_move=True)
+    b_total = _count_side_moves(analysis.moves, white_to_move=False)
+    st.html(_ENGINE_CSS + _render_stockfish_html(
+        white=analysis.white,
+        black=analysis.black,
+        w_acc=white_accuracy,
+        b_acc=black_accuracy,
+        w_acpl=white_acpl,
+        b_acpl=black_acpl,
+        w_bril=white_brilliant_moves,
+        b_bril=black_brilliant_moves,
+        w_best=white_best_moves,
+        b_best=black_best_moves,
+        w_great=white_great_moves,
+        b_great=black_great_moves,
+        w_inac=white_inaccuracies,
+        b_inac=black_inaccuracies,
+        w_mist=white_mistakes,
+        b_mist=black_mistakes,
+        w_blun=white_blunders,
+        b_blun=black_blunders,
+        w_total=w_total,
+        b_total=b_total,
+        depth=analysis.engine_depth,
+        derived=accuracy_is_derived,
+    ))
 
 # ── Queue buttons ─────────────────────────────────────────────────────────────
 missing_lc0 = not lc0_ready
@@ -409,7 +693,6 @@ if missing_lc0 or missing_sf:
 
 # ── Board viewer ──────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown("### Board")
 
 # Use Lc0 arrows when available, otherwise fall back to Stockfish arrows
 moves_df = analysis.moves.copy()
